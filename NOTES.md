@@ -70,12 +70,16 @@ camera with the sun behind it, so its face is lit by ambient alone, and blue amb
 magenta albedo has almost no red left. Anything warm and out of direct sun goes dark and
 slightly wrong, which is a hard thing to trace back to the light.
 
-### The size budget is calibrated against a LOCAL build and CI is 2 MB bigger
+### The size budget: the 2 MB gap was the HDRI, not the toolchain
 
-`size-budget.json` says 26.98 MB, this machine builds 27.03, and CI's first build came out at
-29.10 - a drift of +7.9% against a tolerance of 10%. Nothing is wrong with either build; they
-are different toolchains. But a guard with 2% of headroom left will fail on the next honest
-change, so the budget wants recording from a CI artifact rather than from a desk build.
+Worth recording because the wrong explanation was reached first. CI's build 1 came out at
+29.10 MB against a 26.98 MB budget - +7.9% against a 10% tolerance - and the natural reading
+was that CI and this machine build differently. They do not. Build 1 was made from the commit
+that still had the 1.4 MB HDRI in it; build 2, with it gone, is 27.10 MB against a local 27.03.
+A 0.3% difference, which is the toolchain.
+
+**A number from before a change is not a baseline for after it.** The comparison that mattered
+was CI-to-CI, and there was only one CI build to compare at the time.
 
 ### Still wrong, in the order the sheet shows them
 

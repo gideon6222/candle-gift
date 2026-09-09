@@ -105,6 +105,8 @@ const PALE := Color(1.000, 0.957, 0.847)
 const GREEN := Color(0.122, 0.659, 0.302)
 const PINK := Color(0.910, 0.133, 0.431)
 const CHROME := Color(0.933, 0.953, 0.973)
+## The ladle: frosted pale ice-blue, not metal.
+const LADLE := Color(0.815, 0.902, 0.957)
 const TOWER := Color(0.875, 0.941, 1.000)
 
 
@@ -222,15 +224,15 @@ func _build_world() -> void:
 	_sparks = _mm(_box(0.10, 0.10, 0.10), Color.WHITE, Tuning.MAX_CANDLES)
 
 	# pickups
-	_loose = _mm(_cyl(0.24, 0.24, 1.0, 10), Color(1.0, 0.776, 0.102), POOL)
-	_loose_tips = _mm(_cyl(0.02, 0.20, 0.34, 8), PALE, POOL)
+	_loose = _mm(_loose_mesh(false), Color(1.0, 0.776, 0.102), POOL)
+	_loose_tips = _mm(_loose_mesh(true), Color(0.98, 0.98, 0.96), POOL, false, 0.12)
 	_notes = _mm(_box(1.15, 0.09, 0.60), GREEN, POOL)
 	_note_holes = _mm(_cyl(0.10, 0.10, 0.16, 8), Color.WHITE, POOL)
 
 	# obstacles
-	_barriers = _mm(_box(2.0, 0.52, 0.42), CORAL, POOL)
+	_barriers = _mm(_shard_cluster(false), CORAL, POOL, false, 0.20)
 	_spikes = _mm(_cyl(0.0, 0.50, 0.80, 4), CORAL_LIGHT, POOL * 2)
-	_bar_marks = _mm(_box(0.62, 0.13, 0.09), Color.WHITE, POOL * 3)
+	_bar_marks = _mm(_shard_cluster(true), CORAL_LIGHT, POOL, false, 0.16)
 	_sweepers = _mm(_box(3.4, 0.30, 0.34), SALMON, POOL)
 	_sweep_tips = _mm(_cyl(0.0, 0.44, 0.90, 4), NAVY, POOL)
 	_posts = _mm(_box(0.40, 3.4, 0.40), Color(0.561, 0.510, 0.600), POOL)
@@ -260,6 +262,100 @@ func _rail(side: int) -> MeshInstance3D:
 ## the candles that come out of it are built from the same two numbers and
 ## cannot disagree. A press that stamps an invisible shape is a multiplier with
 ## a gantry over it.
+## A CONE, wound to match the cap in `_mould_mesh`.
+##
+## Winding is copied from geometry that is known to render right rather than
+## derived. Godot treats clockwise as front-facing, `generate_normals()` takes
+## its normals from the winding, and getting it backwards produces a mesh that
+## is lit from inside and culled from outside - which looks like a lighting bug
+## and is a vertex-order one.
+func _add_cone(st: SurfaceTool, at: Vector3, r: float, h: float,
+		lean: float, sides: int) -> void:
+	var apex := at + Vector3(lean * h, h, 0.0)
+	for i in sides:
+		var a0 := TAU * float(i) / float(sides)
+		var a1 := TAU * float(i + 1) / float(sides)
+		var p0 := at + Vector3(cos(a0) * r, 0.0, sin(a0) * r)
+		var p1 := at + Vector3(cos(a1) * r, 0.0, sin(a1) * r)
+		st.add_vertex(apex); st.add_vertex(p0); st.add_vertex(p1)
+		# and a floor, so a shard seen from below is not hollow
+		st.add_vertex(at); st.add_vertex(p1); st.add_vertex(p0)
+
+
+func _add_tube(st: SurfaceTool, at: Vector3, r: float, h: float, sides: int) -> void:
+	var half := h * 0.5
+	for i in sides:
+		var a0 := TAU * float(i) / float(sides)
+		var a1 := TAU * float(i + 1) / float(sides)
+		var d0 := Vector3(cos(a0) * r, 0.0, sin(a0) * r)
+		var d1 := Vector3(cos(a1) * r, 0.0, sin(a1) * r)
+		var b0 := at + d0 - Vector3(0, half, 0)
+		var b1 := at + d1 - Vector3(0, half, 0)
+		var t0 := at + d0 + Vector3(0, half, 0)
+		var t1 := at + d1 + Vector3(0, half, 0)
+		st.add_vertex(b0); st.add_vertex(t0); st.add_vertex(t1)
+		st.add_vertex(b0); st.add_vertex(t1); st.add_vertex(b1)
+		st.add_vertex(at + Vector3(0, half, 0)); st.add_vertex(t0); st.add_vertex(t1)
+		st.add_vertex(at - Vector3(0, half, 0)); st.add_vertex(b1); st.add_vertex(b0)
+
+
+## A CLUSTER OF JAGGED SHARDS, which is what the reference's hazard is: a growth
+## rising off the track with a CURVED silhouette, brighter coral at the tips
+## over a deeper red-orange base.
+##
+## It was a row of three equal pyramids on a low base with white crosses on it,
+## read off a 360p frame. Three identical pyramids in a line is a fence; what
+## makes this read as a growth is that no two shards are the same height and the
+## outer ones lean away from the middle.
+##
+## The whole cluster is ONE MESH and therefore one instance per obstacle, which
+## keeps `visible_instance_count` comparable against the number of barriers in
+## the model - the assertion that catches a lost flush. Built out of ten
+## instances it would have been a number that means nothing.
+func _shard_cluster(tips: bool) -> Mesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := 7
+	for i in n:
+		var f := (float(i) + 0.5) / float(n)
+		var x := (f - 0.5) * 1.85
+		# tall in the middle, short at the ends
+		var bell := 1.0 - pow(absf(f - 0.5) * 2.0, 1.6)
+		# and never exactly the bell, or the silhouette is a smooth arc
+		var jag := 0.82 + 0.36 * SimUtil.hash2(i, 7701)
+		var h := (0.50 + bell * 0.95) * jag
+		var r := 0.13 + bell * 0.085
+		var lean := (f - 0.5) * 0.55
+		var base := 0.0
+		if tips:
+			## The bright cap sits on the shoulder of its own shard, so the two
+			## meshes cannot drift apart: both are functions of the same numbers.
+			base = h * 0.55
+			r *= 0.55
+			h *= 0.45
+		_add_cone(st, Vector3(x, base, 0.0), r, h, lean, 5)
+	st.generate_normals()
+	return st.commit()
+
+
+## THREE candles packed close, at slight angles, each with a thin white wick -
+## which is what a loose pickup looks like in the reference, and one fat gold
+## cylinder is not. One mesh again, so it stays one instance per pickup and the
+## smoke test can still compare the count against the model.
+func _loose_mesh(wicks: bool) -> Mesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in 3:
+		var x := (float(i) - 1.0) * 0.30
+		var z := (SimUtil.hash2(i, 7801) - 0.5) * 0.26
+		if wicks:
+			_add_tube(st, Vector3(x, 0.34, z), 0.035, 0.26, 6)
+		else:
+			_add_tube(st, Vector3(x, 0.0, z), 0.15, 0.62, 9)
+	st.generate_normals()
+	return st.commit()
+
+
 func _mould_mesh(m: int) -> Mesh:
 	var d: Dictionary = Wax.MOULDS[m]
 	var sides := int(d.sides)
@@ -416,18 +512,25 @@ func _make_rig() -> Node3D:
 		## stream leaving the centre of a sphere is leaking rather than pouring.
 		var bowl := MeshInstance3D.new()
 		bowl.mesh = _cyl(0.70, 0.34, 0.62, 14)
-		bowl.material_override = _mat(CHROME)
+		## PALE ICE-BLUE and frosted, not chrome. Read at 1080p the bowl is
+		## closer to frosted glass than to metal, and a mirror-bright ladle in a
+		## flat-shaded world is the one object trying to be photographic.
+		bowl.material_override = _mat(LADLE)
 		head.add_child(bowl)
 		var inner := MeshInstance3D.new()
 		inner.mesh = _cyl(0.60, 0.30, 0.14, 14)
 		inner.material_override = _mat(Color.WHITE)
 		inner.position.y = 0.14
 		head.add_child(inner)
+		## THIN, PALE AND NEARLY VERTICAL, which is what the reference's stream
+		## is. At 0.17-0.26 across and 2.6 long, hanging off a ladle tipped 0.62
+		## rad, it swung out across the whole track and read as a gold baguette
+		## lying over the runway - the single most conspicuous wrong thing in a
+		## frame. Wax leaving a lip falls; it does not point where the lip points.
 		var pour := MeshInstance3D.new()
-		pour.mesh = _cyl(0.17, 0.26, 2.6, 10)
+		pour.mesh = _cyl(0.055, 0.085, 2.3, 8)
 		pour.material_override = _mat(Color.WHITE)
-		pour.position = Vector3(0.52, -1.35, 0.0)
-		pour.rotation_degrees = Vector3(0, 0, 9)
+		pour.position = Vector3(0.46, -1.28, 0.0)
 		head.add_child(pour)
 
 		var gift := MeshInstance3D.new()
@@ -933,24 +1036,14 @@ func _draw_obstacles() -> void:
 		var oz := float(o.z)
 		match String(o.kind):
 			"barrier":
-				# A ROW OF PYRAMIDS on a low base, not a flat panel: seen at
-				# speed the reference's is a zigzag red wall with white crosses.
+				## One shard cluster and one cap cluster, at the same place. Two
+				## instances for the whole hazard, where the pyramid version took ten.
 				if nb < POOL:
-					mb.set_instance_transform(nb, Transform3D(Basis.IDENTITY, Vector3(ox, 0.26, oz)))
+					mb.set_instance_transform(nb, Transform3D(Basis.IDENTITY, Vector3(ox, 0.0, oz)))
 					nb += 1
-				for i in range(-1, 2):
-					if ns >= POOL * 2:
-						break
-					var px := ox + float(i) * 0.62
-					ms.set_instance_transform(ns, Transform3D(Basis.IDENTITY, Vector3(px, 0.86, oz)))
-					ns += 1
-					for m in 2:
-						if nk >= POOL * 3:
-							break
-						var ang := 0.86 if m == 1 else -0.86
-						mk.set_instance_transform(nk, Transform3D(
-							Basis(Vector3(0, 0, 1), ang), Vector3(px, 0.80, oz - 0.30)))
-						nk += 1
+				if nk < POOL:
+					mk.set_instance_transform(nk, Transform3D(Basis.IDENTITY, Vector3(ox, 0.0, oz)))
+					nk += 1
 			"roller":
 				# A pale post OUTSIDE the rail with a shaft reaching part way
 				# across, carrying interlocking coral diamonds. Anchoring it is
@@ -1080,11 +1173,21 @@ func _dress_rig(rig: Node3D, st: Dictionary, sz: float) -> void:
 
 		if bowl.visible:
 			inner.material_override = _mat(col)
-			pour.material_override = _mat(col)
+			## The stream is a PALE, part-transparent version of the wax, not a rope
+			## of it at full strength: falling wax is thin enough to see through.
+			var stream := _mat(col.lerp(Color.WHITE, 0.42))
+			stream.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			stream.albedo_color.a = 0.78
+			pour.material_override = stream
 			# HELD, and tipped just enough to spill over the rim. A ladle that is
 			# pouring barely moves; what moves is the wax.
 			head.position.y = 2.55 + sin(beat) * 0.08
 			head.rotation = Vector3(0, 0, 0.62 + sin(beat * 1.3) * 0.07)
+			## Counter-rotate the stream out of the ladle's tilt so it falls
+			## straight down. It is a child of the head so that it stays on the
+			## LIP as the ladle rocks, which is right - but inheriting the tilt as
+			## well pointed it sideways, and wax does not do that.
+			pour.rotation = Vector3(0, 0, -head.rotation.z + 0.06)
 		elif machine == "ram":
 			dies[int(half.mould)].visible = true
 			var drop := pow(maxf(0.0, sin(beat * 1.7)), 0.55)
