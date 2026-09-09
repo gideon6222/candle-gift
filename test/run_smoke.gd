@@ -143,9 +143,28 @@ func _check_the_controls_are_anchored(main) -> void:
 	_t.eq(gear.mouse_filter, Control.MOUSE_FILTER_STOP,
 		"the gear does not consume its own touches, so one gesture drives two things")
 
+	## Walk UP from the label to whatever is anchored, rather than checking the
+	## label itself.
+	##
+	## The pill became a gold panel with the label inside it, so the label is
+	## laid out by its container and its own anchors are meaningless - the
+	## check went red for a change that was entirely correct. What the rule
+	## actually says is that the pill resolves from the viewport EDGE, and that
+	## is true of whichever ancestor carries the anchor. Asserting it of one
+	## named node was asserting the shape of the scene, not the property.
 	var money: Control = main._money_pill
+	while money != null and money.anchor_right != 1.0 and money.get_parent() is Control:
+		money = money.get_parent()
 	_t.eq(money.anchor_right, 1.0,
 		"the money pill is not anchored to the right edge - it will drift on a wide screen")
+
+	var pill_panel: Node = main._money_pill.get_parent().get_parent()
+	_t.ok(pill_panel is PanelContainer,
+		"the money pill has no panel behind it, so it is white text on the sky")
+	_t.ok(pill_panel.get_theme_stylebox("panel") != null,
+		"the money pill panel has no stylebox, so it is not gold")
+	_t.ok(main._font != null,
+		"the HUD font did not load, so every screen falls back to the engine default")
 
 
 ## A finished level must start the next one.

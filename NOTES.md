@@ -46,6 +46,37 @@ all and rendered as a grey smear that could not be told from a shadow.
 (`0.10 + 0.42 * d`), because the sky HDRI is already a strong ambient and a full diffuse term
 on top of it blew every pale surface out to pure white.
 
+### The screens, 2026-09-09
+
+**The HUD pills are gold**, with a dark line round them and white Fredoka text, and the money
+pill carries a small green banknote drawn in `_draw_note` rather than imported - it is thirty
+pixels wide on the phone. Each pill is a `PanelContainer` so it sizes itself to the text; a
+fixed-width pill clips `1,250 $` the first time the player has a good run.
+
+The smoke test that guards HUD anchoring now **walks up from the label to whatever is
+anchored** instead of checking the label itself. Wrapping the label in a panel made its own
+anchors meaningless and turned the check red for a change that was entirely correct - it was
+asserting the shape of the scene rather than the property the rule is about.
+
+**The sky is a gradient**, deeper at the top, and the CC0 HDRI is gone. It was kept so glossy
+surfaces had something to reflect, under "take the lighting, leave the picture" - but an
+Environment has one sky, and a gradient of our own colours has no join to show, so it can be
+the background and the ambient at once. The horizon end never goes lighter than the flat cyan
+it replaces, or the white runway dissolves into it at about twenty metres.
+
+**Ambient is a neutral COLOUR while the background and reflections come from the sky.** Taking
+ambient from the sky as well turned every station sign from magenta to navy: a sign faces the
+camera with the sun behind it, so its face is lit by ambient alone, and blue ambient times a
+magenta albedo has almost no red left. Anything warm and out of direct sun goes dark and
+slightly wrong, which is a hard thing to trace back to the light.
+
+### The size budget is calibrated against a LOCAL build and CI is 2 MB bigger
+
+`size-budget.json` says 26.98 MB, this machine builds 27.03, and CI's first build came out at
+29.10 - a drift of +7.9% against a tolerance of 10%. Nothing is wrong with either build; they
+are different toolchains. But a guard with 2% of headroom left will fail on the next honest
+change, so the budget wants recording from a CI artifact rather than from a desk build.
+
 ### Still wrong, in the order the sheet shows them
 
 1. **Obstacles are placeholders.** The roller is a giant gold cylinder that reads as a

@@ -53,6 +53,10 @@ var _level_pill: Label
 var _money_pill: Label
 var _gear: Control
 var _toast: Label
+## Fredoka, the reference's face: a rounded geometric sans. Loaded once and
+## shared - a Label that falls back to the engine default is the single most
+## obvious way a screen stops looking like the game it is copying.
+var _font: FontFile
 var _toast_t := 0.0
 
 ## 0 lying flat, 1 stood up. Eased, because the moment the batch rears up is the
@@ -84,6 +88,11 @@ const INTERLUDE_SECONDS := 2.4
 ## are a very dark desaturated navy.
 const INK := Color(0.114, 0.106, 0.208)
 const SKY := Color(0.071, 0.702, 0.933)
+## The top of the gradient. Darker than SKY, never lighter - see _build_world.
+const SKY_TOP := Color(0.035, 0.463, 0.827)
+## The gold of the HUD pills, and the dark line around them.
+const PILL := Color(1.000, 0.769, 0.078)
+const NOTE := Color(0.180, 0.686, 0.353)
 const ROAD := Color(0.949, 0.933, 0.984)
 const STRIPE := Color(0.878, 0.831, 0.957)
 const RAIL := Color(0.690, 0.478, 0.894)
@@ -127,46 +136,52 @@ func _ensure_booted() -> void:
 func _build_world() -> void:
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
-	## A REAL SKY, not a flat colour.
+	## A GRADIENT SKY, deeper at the top, and it is also the ambient and the
+	## reflection source.
 	##
-	## 1.4 MB of CC0 HDRI, and it does three jobs at once: it lights the
-	## world, it gives the wax and the ladle something to REFLECT - a
-	## glossy surface with nothing to reflect renders as a dull plate -
-	## and it is the sky itself. On a native build the download cost is
-	## nothing; the web stack's caution about imports came from mobile
-	## data and does not apply here.
-	var sky_tex := load("res://assets/env/sky_1k.hdr") as Texture2D
-	if sky_tex != null:
-		var panorama := PanoramaSkyMaterial.new()
-		panorama.panorama = sky_tex
-		var sky := Sky.new()
-		sky.sky_material = panorama
-		e.sky = sky
-		## TAKE THE LIGHTING, LEAVE THE PICTURE.
-		##
-		## Drawn as the background the HDRI is the join that shows in the
-		## first frame: this game's sky is a flat bright blue and a
-		## photographic one behind it looks like two games at once. But the
-		## picture was never the value - what a glossy surface REFLECTS is,
-		## and wax with nothing to reflect renders as a dull plate. So the
-		## sky stays as the ambient and reflection source while the
-		## background is the game's own colour. Same rule as taking a normal
-		## map and leaving the colour map, applied to an environment.
-		e.background_mode = Environment.BG_COLOR
-		e.background_color = SKY
-		e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-		e.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-		e.ambient_light_energy = 0.45
-	else:
-		e.background_mode = Environment.BG_COLOR
-	## FLAT, and never fading toward white at the horizon. A gradient sky put a
-	## white runway against a near-white backdrop at exactly the distance the
-	## player steers by, which is the same failure as a pink road under a pink
-	## sky: the track dissolves about twenty metres out.
-	e.background_color = SKY
+	## This replaces the CC0 HDRI that was here. That was kept for one reason -
+	## a glossy surface with nothing to reflect renders as a dull plate - under
+	## the rule "take the lighting, leave the picture", with the background left
+	## as flat colour because a photographic sky behind a flat-shaded game looks
+	## like two games at once.
+	##
+	## Read at 1080p, the reference's sky is a gradient, and a gradient of OUR
+	## OWN colours has no join to show: it can be the background and the ambient
+	## at the same time, which an environment only supports for one sky. What is
+	## given up is a detailed reflection, and at the 0.45 gloss the wax settled
+	## on that was worth less than the sky being right.
+	##
+	## The horizon end never goes lighter than the flat colour it replaces. A
+	## sky that fades toward white puts a white runway against a near-white
+	## backdrop at exactly the distance the player steers by, and the track
+	## dissolves about twenty metres out - the same failure as a pink road under
+	## a pink sky. The gradient is allowed to go DARKER upward and nowhere else.
+	var sky_mat := ProceduralSkyMaterial.new()
+	sky_mat.sky_top_color = SKY_TOP
+	sky_mat.sky_horizon_color = SKY
+	sky_mat.ground_horizon_color = SKY
+	sky_mat.ground_bottom_color = SKY
+	sky_mat.sky_curve = 0.18
+	sky_mat.sun_angle_max = 1.0
+	sky_mat.energy_multiplier = 1.0
+	var sky := Sky.new()
+	sky.sky_material = sky_mat
+	e.sky = sky
+	e.background_mode = Environment.BG_SKY
+	## BACKGROUND from the sky, AMBIENT from a neutral colour, REFLECTIONS from
+	## the sky. An Environment lets these be three different sources and they
+	## have to be, because a blue sky is blue AMBIENT.
+	##
+	## Taking ambient from the sky as well turned every station sign from
+	## magenta to navy: the sign faces the camera, the sun is behind and above,
+	## so the face is lit by ambient alone - and blue ambient times a magenta
+	## albedo has almost no red left in it. Anything warm that is not in direct
+	## sun goes dark and slightly wrong, which is the hardest kind of wrong to
+	## trace back to the light.
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.80, 0.86, 0.95)
-	e.ambient_light_energy = 0.62
+	e.ambient_light_color = Color(0.88, 0.91, 0.97)
+	e.ambient_light_energy = 0.78
+	e.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.environment = e
 	add_child(env)
 
@@ -314,20 +329,23 @@ func _make_rig() -> Node3D:
 		## no arc parameter in Godot 4, so a "curved arm" made from one is a
 		## complete ring lying flat across the track - which is what it drew.
 		var post := MeshInstance3D.new()
-		post.mesh = _box(0.14, 7.0, 0.14)
+		post.mesh = _box(0.14, 7.6, 0.14)
 		post.material_override = _mat(Color(0.184, 0.231, 0.322))
-		post.position = Vector3(float(side) * (Tuning.ROAD_HALF_WIDTH - 0.2), 3.5, 0.0)
+		post.position = Vector3(float(side) * (Tuning.ROAD_HALF_WIDTH - 0.2), 3.8, 0.0)
 		furn.add_child(post)
 
 		var boom := MeshInstance3D.new()
 		boom.mesh = _box(2.3, 0.13, 0.13)
 		boom.material_override = _mat(Color(0.184, 0.231, 0.322))
-		boom.position = Vector3(float(side) * (Tuning.ROAD_HALF_WIDTH - 1.3), 6.7, 0.0)
+		boom.position = Vector3(float(side) * (Tuning.ROAD_HALF_WIDTH - 1.3), 7.3, 0.0)
 		boom.rotation = Vector3(0, 0, float(side) * 0.16)
 		furn.add_child(boom)
 
 		var sign_node := MeshInstance3D.new()
-		sign_node.mesh = _box(3.0, 0.86, 0.20)
+		## Smaller than it was, and higher. At three metres wide and 6.4 up it was
+		## a billboard you drove at rather than a sign you drove under: it filled a
+		## third of the frame for the second before you passed it.
+		sign_node.mesh = _box(2.3, 0.66, 0.18)
 		sign_node.material_override = _mat(PINK)
 		## HIGH ENOUGH TO PASS UNDER. At 4.15 the sign hung at the camera's own
 		## eye height, so instead of sweeping up and out of the top of the frame
@@ -335,7 +353,7 @@ func _make_rig() -> Node3D:
 		## camera looks down about ten degrees and the frame reaches some
 		## twenty-eight degrees above that, so a sign two and a half metres over
 		## the lens leaves the top while it is still four metres away.
-		sign_node.position = Vector3(float(side) * 0.3, 6.4, 0.0)
+		sign_node.position = Vector3(float(side) * 0.3, 7.0, 0.0)
 		furn.add_child(sign_node)
 
 		## The label, so a station says what it is. `Label3D` is a billboarded
@@ -343,14 +361,16 @@ func _make_rig() -> Node3D:
 		## world - and it is the only text in the 3D scene.
 		var label := Label3D.new()
 		label.text = "CANDLE"
-		label.font_size = 96
+		label.font_size = 72
 		label.pixel_size = 0.006
 		label.modulate = Color.WHITE
-		label.outline_size = 22
+		if _font != null:
+			label.font = _font
+		label.outline_size = 18
 		label.outline_modulate = Color(0.55, 0.03, 0.22)
 		label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		label.rotation = Vector3(0, PI, 0)
-		label.position = Vector3(float(side) * 0.3, 6.4, -0.14)
+		label.position = Vector3(float(side) * 0.3, 7.0, -0.12)
 		furn.add_child(label)
 
 		## THE WAX IS FLAT WITH THE ROAD. Read at 1080p: a pool is an area of
@@ -462,6 +482,8 @@ func _make_rig() -> Node3D:
 ## phone's aspect, and assert the PROPERTY (that it resolves from the viewport
 ## edge) rather than the position.
 func _build_hud() -> void:
+	_font = load("res://assets/font/Fredoka-Bold.ttf") as FontFile
+
 	var layer := CanvasLayer.new()
 	layer.name = "Hud"
 	add_child(layer)
@@ -488,7 +510,7 @@ func _build_hud() -> void:
 	_ui.add_child(_gear)
 
 	_level_pill = _pill(Control.PRESET_CENTER_TOP, Vector2(0, 60), 44)
-	_money_pill = _pill(Control.PRESET_TOP_RIGHT, Vector2(-40, 60), 44)
+	_money_pill = _pill(Control.PRESET_TOP_RIGHT, Vector2(-40, 60), 44, true)
 
 	_toast = Label.new()
 	_toast.set_anchors_preset(Control.PRESET_CENTER_TOP)
@@ -496,28 +518,79 @@ func _build_hud() -> void:
 	_toast.offset_left = -420
 	_toast.offset_right = 420
 	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if _font != null:
+		_toast.add_theme_font_override("font", _font)
 	_toast.add_theme_font_size_override("font_size", 84)
 	_toast.add_theme_color_override("font_color", Color.WHITE)
-	_toast.add_theme_color_override("font_outline_color", Color(0.16, 0.05, 0.22))
+	_toast.add_theme_color_override("font_outline_color", INK)
 	_toast.add_theme_constant_override("outline_size", 18)
 	_toast.modulate.a = 0.0
 	_ui.add_child(_toast)
 
 
-func _pill(preset: int, offset: Vector2, font: int) -> Label:
-	var l := Label.new()
-	l.set_anchors_preset(preset)
-	l.position = offset
+## A HUD PILL: a gold lozenge with a dark line round it and white bold text,
+## which is what the reference has. Ours was white text floating on the sky.
+##
+## Returns the Label, because `_sync` sets `.text` on it every frame and the
+## panel around it is scenery. The panel is a `PanelContainer` so it sizes
+## itself to whatever the text grows to - a fixed-width pill clips "1,250 $" the
+## first time the player has a good run.
+func _pill(preset: int, offset: Vector2, font: int, note: bool = false) -> Label:
+	var panel := PanelContainer.new()
+	panel.set_anchors_preset(preset)
+	panel.position = offset
 	if preset == Control.PRESET_TOP_RIGHT:
-		l.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+		panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	elif preset == Control.PRESET_CENTER_TOP:
-		l.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = PILL
+	sb.border_color = INK
+	sb.set_border_width_all(6)
+	## A lozenge, not a rounded rectangle: the radius is half the height, so the
+	## ends are semicircles however long the text gets.
+	sb.set_corner_radius_all(int(font * 0.9))
+	sb.content_margin_left = 34.0
+	sb.content_margin_right = 34.0
+	sb.content_margin_top = 10.0
+	sb.content_margin_bottom = 12.0
+	panel.add_theme_stylebox_override("panel", sb)
+	_ui.add_child(panel)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	panel.add_child(row)
+
+	if note:
+		## The little green banknote on the money pill. Drawn rather than
+		## imported: it is thirty pixels wide on the phone, and at that size an
+		## icon file is a dependency to keep in step for no visible gain.
+		var chip := Control.new()
+		chip.custom_minimum_size = Vector2(46, 34)
+		chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		chip.draw.connect(_draw_note.bind(chip))
+		row.add_child(chip)
+
+	var l := Label.new()
 	l.add_theme_font_size_override("font_size", font)
 	l.add_theme_color_override("font_color", Color.WHITE)
-	l.add_theme_color_override("font_outline_color", Color(0.16, 0.05, 0.22))
-	l.add_theme_constant_override("outline_size", 14)
-	_ui.add_child(l)
+	l.add_theme_color_override("font_outline_color", INK)
+	l.add_theme_constant_override("outline_size", 10)
+	if _font != null:
+		l.add_theme_font_override("font", _font)
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(l)
 	return l
+
+
+func _draw_note(c: Control) -> void:
+	var r := Rect2(Vector2.ZERO, c.size)
+	c.draw_rect(r, INK)
+	c.draw_rect(r.grow(-4.0), NOTE)
+	var mid := r.size * 0.5
+	c.draw_circle(mid, minf(r.size.x, r.size.y) * 0.22, Color(0.86, 0.96, 0.89))
 
 
 func _draw_gear() -> void:
