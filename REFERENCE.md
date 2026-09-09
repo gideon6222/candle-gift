@@ -188,6 +188,63 @@ A full-screen **magenta** modal:
 - The bottom button is either **`▶ CLAIM 2700`** (rewarded video, = amount × the wedge) or
   **`TAKE 582`** (the plain amount).
 
+## Read at 1080p, close up — corrections to everything above
+
+The findings above were read off 360p frames and off the store screenshots. Re-read on
+**2026-09-09 from the same walkthrough at 1080p**, cropped 1:1, several of them were wrong.
+**Prefer this section where it disagrees with anything earlier in this file.**
+
+Getting 1080p out of the player matters and is not automatic: it serves 360p by default, so
+`player.setPlaybackQualityRange('hd1080','hd1080')` then re-check `video.videoWidth` — and
+note the 1080p stream is a **different encode with a different timeline**, so every timestamp
+recorded against the 360p one is wrong for it. Re-locate the moments with a contact sheet.
+
+### The wax is FLAT with the road. It is not a tub.
+
+The single biggest correction. A pool is an area of colour **level with the road surface**,
+with a slightly irregular edge — no side wall, no rim, no depth. What makes it read as liquid
+is entirely what is happening ON it:
+
+- **Soft swirled marbling** in a lighter tint of the same colour. Broad organic streaks, like
+  stirred paint, at a scale of roughly a third of the pool's width. Not a tiling texture.
+- **Bubbles**: six to eight small dark dimples scattered over the surface, each a soft ellipse
+  a shade darker than the wax with a lighter rim. They read as craters, not as spheres.
+- **A ripple ring** where the ladle's stream lands, and a **cluster of white bubbles** around
+  the impact point.
+- The pool covers **about two thirds of the track width**, not exactly half.
+
+### The ladle
+
+A **pale ice-blue rounded bowl** — closer to frosted glass than to chrome — tipped over the
+pool. The stream out of it is **thin, pale and translucent**, not a rope of colour, and it is
+nearly vertical. A small cluster of white bubbles sits where it lands.
+
+### The traps are crystal shards, not walls
+
+The coral hazard is a **cluster of jagged pointed shards** rising off the track edge — like a
+flame or a crystal growth, brighter coral at the tips over a deeper red-orange base, with a
+curved silhouette. It is not a flat panel and not a row of pyramids on a base.
+
+### The HUD pills are GOLD
+
+`Level 1` and the money are both **gold/yellow rounded pills** with a dark outline and white
+bold text. The money pill carries a small green banknote icon. Earlier notes said the money
+pill was green; that is the icon, not the pill.
+
+### The sky is a gradient
+
+Deeper blue at the top, paler toward the horizon — not the flat cyan recorded earlier.
+
+### Money
+
+A **dark green rounded price tag** with `5 $` in white, a **white punched hole** at the left
+end, and a notch in the outline. It lies flat on the track.
+
+### Loose candles
+
+Gold, lying at slight angles, packed close, each with a **thin white wick** — the wicks are
+white, not gold, and they are clearly separate from the body.
+
 ## Art direction
 
 - **Sky:** flat bright cyan.

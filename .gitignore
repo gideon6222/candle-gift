@@ -20,3 +20,8 @@ build/
 # several hundred files of engine code that would drown every diff.
 android/
 
+
+# Reference frames pulled from the original game for side-by-side comparison.
+# Someone else's work; kept local, never committed.
+compare/ref/
+compare/out/

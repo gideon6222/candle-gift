@@ -79,6 +79,10 @@ var frozen := false
 const INTERLUDE_SECONDS := 2.4
 
 # --- the palette, in one place -------------------------------------------
+## The ink for every outline. Not black: a pure black line on flat pastels
+## reads as a comic panel rather than as a toy, and the reference's lines
+## are a very dark desaturated navy.
+const INK := Color(0.114, 0.106, 0.208)
 const SKY := Color(0.071, 0.702, 0.933)
 const ROAD := Color(0.949, 0.933, 0.984)
 const STRIPE := Color(0.878, 0.831, 0.957)
@@ -123,7 +127,38 @@ func _ensure_booted() -> void:
 func _build_world() -> void:
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR
+	## A REAL SKY, not a flat colour.
+	##
+	## 1.4 MB of CC0 HDRI, and it does three jobs at once: it lights the
+	## world, it gives the wax and the ladle something to REFLECT - a
+	## glossy surface with nothing to reflect renders as a dull plate -
+	## and it is the sky itself. On a native build the download cost is
+	## nothing; the web stack's caution about imports came from mobile
+	## data and does not apply here.
+	var sky_tex := load("res://assets/env/sky_1k.hdr") as Texture2D
+	if sky_tex != null:
+		var panorama := PanoramaSkyMaterial.new()
+		panorama.panorama = sky_tex
+		var sky := Sky.new()
+		sky.sky_material = panorama
+		e.sky = sky
+		## TAKE THE LIGHTING, LEAVE THE PICTURE.
+		##
+		## Drawn as the background the HDRI is the join that shows in the
+		## first frame: this game's sky is a flat bright blue and a
+		## photographic one behind it looks like two games at once. But the
+		## picture was never the value - what a glossy surface REFLECTS is,
+		## and wax with nothing to reflect renders as a dull plate. So the
+		## sky stays as the ambient and reflection source while the
+		## background is the game's own colour. Same rule as taking a normal
+		## map and leaving the colour map, applied to an environment.
+		e.background_mode = Environment.BG_COLOR
+		e.background_color = SKY
+		e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+		e.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
+		e.ambient_light_energy = 0.45
+	else:
+		e.background_mode = Environment.BG_COLOR
 	## FLAT, and never fading toward white at the horizon. A gradient sky put a
 	## white runway against a near-white backdrop at exactly the distance the
 	## player steers by, which is the same failure as a pink road under a pink
@@ -131,13 +166,13 @@ func _build_world() -> void:
 	e.background_color = SKY
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(0.80, 0.86, 0.95)
-	e.ambient_light_energy = 0.85
+	e.ambient_light_energy = 0.62
 	env.environment = e
 	add_child(env)
 
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-58, -34, 0)
-	sun.light_energy = 1.25
+	sun.light_energy = 1.0
 	add_child(sun)
 
 	_cam = Camera3D.new()
@@ -158,7 +193,9 @@ func _build_world() -> void:
 	_rail_r = _rail(1)
 
 	# lane stripes: the main sense of speed
-	_stripes = _mm(_box(Tuning.ROAD_HALF_WIDTH * 2.0, 0.06, 1.1), STRIPE, 64)
+	## No line on the stripes: they are seen almost edge-on the whole time,
+	## which is exactly where a fresnel rim darkens a whole face.
+	_stripes = _mm(_box(Tuning.ROAD_HALF_WIDTH * 2.0, 0.06, 1.1), STRIPE, 64, false, 0.0)
 
 	# the batch
 	for m in Wax.MOULDS.size():
@@ -184,8 +221,8 @@ func _build_world() -> void:
 	_posts = _mm(_box(0.40, 3.4, 0.40), Color(0.561, 0.510, 0.600), POOL)
 
 	# scenery: pale stacked-cylinder candle towers, well below the track
-	_towers = _mm(_cyl(1.0, 1.0, 1.0, 10), TOWER, POOL * 2)
-	_tower_tips = _mm(_cyl(0.0, 0.62, 1.3, 8), GOLD, POOL)
+	_towers = _mm(_cyl(1.0, 1.0, 1.0, 10), TOWER, POOL * 2, false, 0.22)
+	_tower_tips = _mm(_cyl(0.0, 0.62, 1.3, 8), GOLD, POOL, false, 0.22)
 
 	for i in STATION_SLOTS:
 		_rigs.append(_make_rig())
@@ -258,6 +295,16 @@ func _make_rig() -> Node3D:
 		h.position.x = float(side) * (Tuning.ROAD_HALF_WIDTH * 0.5)
 		g.add_child(h)
 
+		## THE OVERHEAD FURNITURE IS A SEPARATE NODE from the pool, because the
+		## two have to disappear at different moments. The pool is ground: it
+		## stays until its far edge is behind the LENS, or it pops out from
+		## under a batch still standing in it. The gantry is overhead: it has
+		## to go the moment it is passed, or a three-metre sign sits a few
+		## metres from the camera and fills half the frame - which is exactly
+		## what one cull distance for both produced.
+		var furn := Node3D.new()
+		h.add_child(furn)
+
 		## The reference hangs each sign from a thin dark CURVED ARM rising from
 		## the track edge and leaning in over the pool, like a street lamp - not
 		## from a gantry with a post either side. It is most of why its runway
@@ -267,23 +314,29 @@ func _make_rig() -> Node3D:
 		## no arc parameter in Godot 4, so a "curved arm" made from one is a
 		## complete ring lying flat across the track - which is what it drew.
 		var post := MeshInstance3D.new()
-		post.mesh = _box(0.14, 4.0, 0.14)
+		post.mesh = _box(0.14, 7.0, 0.14)
 		post.material_override = _mat(Color(0.184, 0.231, 0.322))
-		post.position = Vector3(float(side) * (Tuning.ROAD_HALF_WIDTH - 0.2), 2.0, 0.0)
-		h.add_child(post)
+		post.position = Vector3(float(side) * (Tuning.ROAD_HALF_WIDTH - 0.2), 3.5, 0.0)
+		furn.add_child(post)
 
 		var boom := MeshInstance3D.new()
 		boom.mesh = _box(2.3, 0.13, 0.13)
 		boom.material_override = _mat(Color(0.184, 0.231, 0.322))
-		boom.position = Vector3(float(side) * (Tuning.ROAD_HALF_WIDTH - 1.3), 3.9, 0.0)
+		boom.position = Vector3(float(side) * (Tuning.ROAD_HALF_WIDTH - 1.3), 6.7, 0.0)
 		boom.rotation = Vector3(0, 0, float(side) * 0.16)
-		h.add_child(boom)
+		furn.add_child(boom)
 
 		var sign_node := MeshInstance3D.new()
 		sign_node.mesh = _box(3.0, 0.86, 0.20)
 		sign_node.material_override = _mat(PINK)
-		sign_node.position = Vector3(float(side) * 0.3, 3.62, 0.0)
-		h.add_child(sign_node)
+		## HIGH ENOUGH TO PASS UNDER. At 4.15 the sign hung at the camera's own
+		## eye height, so instead of sweeping up and out of the top of the frame
+		## it slid across the middle of it, over the road you steer by. The
+		## camera looks down about ten degrees and the frame reaches some
+		## twenty-eight degrees above that, so a sign two and a half metres over
+		## the lens leaves the top while it is still four metres away.
+		sign_node.position = Vector3(float(side) * 0.3, 6.4, 0.0)
+		furn.add_child(sign_node)
 
 		## The label, so a station says what it is. `Label3D` is a billboarded
 		## quad - no font atlas to build and no canvas to keep in step with the
@@ -297,29 +350,45 @@ func _make_rig() -> Node3D:
 		label.outline_modulate = Color(0.55, 0.03, 0.22)
 		label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		label.rotation = Vector3(0, PI, 0)
-		label.position = Vector3(float(side) * 0.3, 3.62, -0.14)
-		h.add_child(label)
+		label.position = Vector3(float(side) * 0.3, 6.4, -0.14)
+		furn.add_child(label)
 
-		## A VAT, not a decal. The reference's wax stands proud of the track with
-		## a visible side wall and a thick top - a flat plane painted on the road
-		## reads as carpet, and the depth is what says the candles are being
-		## dragged THROUGH something.
-		var w := Tuning.ROAD_HALF_WIDTH - Tuning.POOL_INSET * 2.0
-		var wall := MeshInstance3D.new()
-		wall.mesh = _box(w + 0.34, 0.72, Tuning.POOL_LENGTH + 0.34)
-		wall.material_override = _mat(Color.WHITE)
-		wall.position.y = 0.28
+		## THE WAX IS FLAT WITH THE ROAD. Read at 1080p: a pool is an area of
+		## colour level with the surface, with no side wall and no rim. What
+		## makes it read as liquid is what happens ON it - marbling, dimples and
+		## a ring where the stream lands - and all of that is in `wax.gdshader`.
+		##
+		## This was a raised tub with a darker rim for one version, built off a
+		## 360p frame where the pool's own shading was mistaken for a wall.
+		## Slightly wider than half, so the two pools MEET. At exactly half
+		## there is a white seam down the centre line, and the reference has
+		## one continuous sheet of wax with two colours in it.
+		var w := Tuning.ROAD_HALF_WIDTH * 1.04
+		var wall := MeshInstance3D.new()   ## kept so the rig shape is unchanged
+		wall.mesh = _box(0.01, 0.01, 0.01)
+		wall.visible = false
 		h.add_child(wall)
 		var liquid := MeshInstance3D.new()
-		liquid.mesh = _box(w, 0.52, Tuning.POOL_LENGTH)
-		liquid.material_override = _mat(Color.WHITE)
-		liquid.position.y = 0.24
+		var quad := PlaneMesh.new()
+		quad.size = Vector2(w, Tuning.POOL_LENGTH)
+		## Subdivided so the fragment shader has room to work and so the surface
+		## can be displaced later without re-authoring the mesh.
+		quad.subdivide_width = 8
+		quad.subdivide_depth = 16
+		liquid.mesh = quad
+		liquid.material_override = _wax_material()
+		## ABOVE THE STRIPES, and by a real margin. The road stripes are boxes
+		## 0.06 tall sitting at y=0.02, so their tops are at 0.05 - a pool at
+		## 0.03 has them standing PROUD of it, and the wax rendered as pink with
+		## white rungs across it. It reads as a transparency or a z-fighting bug
+		## and is neither: the stripes are simply taller than the wax is deep.
+		liquid.position.y = 0.09
 		h.add_child(liquid)
 
 		# the machine over it
 		var head := Node3D.new()
 		head.position = Vector3(float(side) * 0.1, 2.6, -Tuning.POOL_LENGTH * 0.5 + 1.4)
-		h.add_child(head)
+		furn.add_child(head)
 
 		## A LADLE, not a ball on a stick: an open bowl with a rim, wax visible
 		## inside it, tipped so the stream leaves the LIP. A whole sphere with a
@@ -365,7 +434,8 @@ func _make_rig() -> Node3D:
 		h.add_child(plate)
 
 		halves.append({
-			"node": h, "sign": sign_node, "label": label, "wall": wall, "liquid": liquid,
+			"node": h, "furn": furn, "sign": sign_node, "label": label,
+			"wall": wall, "liquid": liquid,
 			"head": head, "bowl": bowl, "inner": inner, "pour": pour,
 			"gift": gift, "dies": dies, "plate": plate, "side": side,
 		})
@@ -572,7 +642,7 @@ func _sync() -> void:
 func _draw_camera(z: float) -> void:
 	var tail := clampf(Trail.back_for(sim.count() - 1), 0.0, 16.0)
 	var up := _stand * 2.2
-	var eye := Vector3(sim.x * 0.55, 5.4 + tail * 0.18 + up,
+	var eye := Vector3(sim.x * 0.55, 3.9 + tail * 0.16 + up,
 		z - 11.5 - tail * 0.45 - up * 1.2)
 	var focus := Vector3(sim.x * 0.35, 1.2, z + 16.0)
 	# Transform3D.looking_at, not Node3D.look_at: the node method requires the
@@ -858,10 +928,13 @@ func _draw_stations() -> void:
 			break
 		var sz := float(st.z)
 		## Behind the CAMERA, not behind the batch: the camera sits about
-		## fifteen metres back, so a station culled at the batch's own
-		## position is still in shot - and its sign fills the bottom of
-		## the screen from a metre away.
-		if sz < _cam_z + 5.0 or sz > sim.distance + 130.0:
+		## eleven metres back, so a station culled at the batch's own
+		## position is still eleven metres in FRONT of the lens.
+		##
+		## The station is culled on its POOL, which is the last part of it to
+		## leave the frame. The gantry over it goes separately, in `_dress_rig`,
+		## the moment it is passed.
+		if sz + Tuning.POOL_LENGTH * 0.5 < _cam_z or sz > sim.distance + 130.0:
 			continue
 		_dress_rig(_rigs[i], st, sz)
 		i += 1
@@ -882,17 +955,38 @@ func _dress_rig(rig: Node3D, st: Dictionary, sz: float) -> void:
 		var liquid := bool(k.liquid)
 		var beat := sim.time * 2.2 + float(hi) * 0.7 + sz * 0.11
 
+		## The gantry goes as soon as the batch is through it. It is drawn from
+		## the moment the station comes into range until then, so nothing pops
+		## in ahead of the player; what it must not do is linger BEHIND them,
+		## where a three-metre sign a few metres off the lens covers half the
+		## road. One cull distance for both cannot work: the pool has to
+		## outlast the batch that is still standing in it.
+		var furn: Node3D = h.furn
+		furn.visible = sz > sim.distance - 1.0
+
 		h.sign.material_override = _mat(PINK)
 		var label: Label3D = h.label
 		label.text = String(k.label)
-		var wall: MeshInstance3D = h.wall
 		var liq: MeshInstance3D = h.liquid
-		wall.visible = liquid
-		wall.material_override = _mat(col.darkened(0.38))
 		liq.visible = kind != Stations.ROTATE
-		liq.material_override = _mat(col)
-		liq.scale.y = 1.0 if liquid else 0.07
-		liq.position.y = 0.24 if liquid else 0.03
+		var wax_mat: ShaderMaterial = liq.material_override
+		wax_mat.set_shader_parameter("tint", col)
+		## Only a wax or scent station is liquid. Glitter, the press and the gift
+		## box get the same quad with the flow and the gloss taken out of it, so
+		## it reads as a painted pad rather than as a puddle a bottle is standing
+		## in.
+		wax_mat.set_shader_parameter("flow_speed", 0.09 if liquid else 0.0)
+		wax_mat.set_shader_parameter("gloss", 0.45 if liquid else 0.12)
+		wax_mat.set_shader_parameter("bubble_scale", 0.9 if liquid else 0.0)
+		## Where the stream is landing, in the quad's own space, and how long ago
+		## - so the ring spreads from the pour rather than from the middle.
+		if liquid:
+			var head_local: Node3D = h.head
+			wax_mat.set_shader_parameter("impact",
+				Vector2(head_local.position.x * 2.0, head_local.position.z * 2.0))
+			wax_mat.set_shader_parameter("impact_age", fposmod(sim.time * 1.1, 1.6))
+		else:
+			wax_mat.set_shader_parameter("impact_age", 99.0)
 
 		var machine := String(k.machine)
 		var head: Node3D = h.head
@@ -967,6 +1061,29 @@ func _unhandled_input(event: InputEvent) -> void:
 
 # --- helpers --------------------------------------------------------------
 
+## One ShaderMaterial per pool, because each carries its own colour and its own
+## impact point. The shader itself is shared.
+func _wax_material() -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = load("res://assets/shaders/wax.gdshader")
+	return m
+
+
+## The toon material every MultiMesh uses.
+##
+## `ink_width` is where an inverted hull's `grow` used to be: a big prop wants a
+## narrower band than a candle does, or the whole thing goes dark. Zero turns
+## the line off, for things like the road stripes that are too thin to carry one.
+func _toon(c: Color, ink_width: float, tinted: bool) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = load("res://assets/shaders/toon.gdshader")
+	m.set_shader_parameter("tint", c)
+	m.set_shader_parameter("ink", INK)
+	m.set_shader_parameter("ink_width", ink_width)
+	m.set_shader_parameter("use_instance_color", tinted)
+	return m
+
+
 func _mat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
@@ -994,7 +1111,8 @@ func _cyl(top: float, bottom: float, height: float, sides: int) -> CylinderMesh:
 ## nodes: it is a number the tests can compare against the model. A render path
 ## that silently stops drawing and a subsystem that does not exist look identical
 ## from outside, and that has already cost a full tuning pass on another game.
-func _mm(mesh: Mesh, c: Color, count: int, tinted: bool = false) -> MultiMeshInstance3D:
+func _mm(mesh: Mesh, c: Color, count: int, tinted: bool = false,
+		ink: float = 0.30) -> MultiMeshInstance3D:
 	var mmi := MultiMeshInstance3D.new()
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -1007,8 +1125,6 @@ func _mm(mesh: Mesh, c: Color, count: int, tinted: bool = false) -> MultiMeshIns
 	mm.instance_count = count
 	mm.visible_instance_count = 0
 	mmi.multimesh = mm
-	var m := _mat(c)
-	m.vertex_color_use_as_albedo = true
-	mmi.material_override = m
+	mmi.material_override = _toon(c, ink, tinted)
 	add_child(mmi)
 	return mmi

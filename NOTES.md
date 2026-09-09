@@ -1,5 +1,66 @@
 # Notes — Candle Gift
 
+## Graphics pass, 2026-09-09
+
+Judged from a **contact sheet** (`scripts/sheet.gd` + `scripts/sheet.py`), which renders
+twelve frames across a whole level in one engine start and stitches them into a grid. It
+found four separate faults on its first run that individually chosen screenshots had missed,
+and it is now the way to look at this game:
+
+```bash
+godot --path . --resolution 460x996 --script res://scripts/sheet.gd -- 12
+python scripts/sheet.py "<user data dir>/sheet" sheet.png 35.5
+```
+
+**The wax is a flat shaded quad and now reads as liquid.** `assets/shaders/wax.gdshader`:
+domain-warped marbling flowing down the track, discrete dimples on a jittered grid, a ring
+spreading from where the ladle's stream lands, and a fragment-computed normal map. Two things
+had to be fixed before any of it was visible:
+
+- **The pool sits at y=0.09, not 0.03.** The road stripes are boxes 0.06 tall at y=0.02, so
+  their tops are at 0.05 and they were standing PROUD of the wax. It renders as pink with
+  white rungs across it and reads as a transparency or z-fighting bug; it is neither.
+- **The two halves are `ROAD_HALF_WIDTH * 1.04` each, not `* 0.95`.** At exactly half there
+  is a white seam down the centre line. The reference has one continuous sheet with two
+  colours in it.
+
+**Stations are culled twice, on two different rules.** The pool is ground and has to outlast
+the batch standing in it, so it is culled when its far edge passes the LENS. The gantry is
+overhead and has to go the moment it is passed, or a three-metre sign a few metres off the
+camera covers half the road - which is what one shared cull distance produced. The gantry also
+moved from y=4.15 to y=6.4: at 4.15 it hung at the camera's own eye height and slid across the
+middle of the frame instead of sweeping up and out of it.
+
+**Everything instanced is toon-shaded with a fresnel ink rim** (`assets/shaders/toon.gdshader`)
+rather than an inverted hull. The hull is the normal way to do this and **it does not work on a
+Godot MultiMesh** - it draws over the object. That was measured, not assumed: with the hull
+shrunk six centimetres INSIDE the candle it still covered it, in every combination of
+`CULL_FRONT` / `CULL_DISABLED`, `next_pass` / sibling instance, depth writing on and off, and
+both render priorities. It works fine on a `MeshInstance3D`, which is what makes it look like
+it should work here.
+
+The rim matters more than it sounds: a cream candle lying on this white runway had no edge at
+all and rendered as a grey smear that could not be told from a shadow.
+
+`sun.light_energy` dropped 1.25 -> 1.0 and the toon `light()` is deliberately dim
+(`0.10 + 0.42 * d`), because the sky HDRI is already a strong ambient and a full diffuse term
+on top of it blew every pale surface out to pure white.
+
+### Still wrong, in the order the sheet shows them
+
+1. **Obstacles are placeholders.** The roller is a giant gold cylinder that reads as a
+   baguette; the spikes are plain cones. `REFERENCE.md` says jagged crystal shards with a
+   curved silhouette, brighter coral at the tips over a deeper red-orange base.
+2. **The HUD is plain white text.** It should be gold rounded pills with a dark outline and
+   white bold text, the money pill carrying a small green banknote icon. `Fredoka-Bold.ttf`
+   and `Fredoka-SemiBold.ttf` are in `assets/font/` and are not yet used by anything.
+3. **The sky is flat cyan.** The reference is a gradient, deeper at the top.
+4. **Money and loose candles** are a green bar and gold sticks. They want the dark green price
+   tag with a white punched hole, and white wicks on the candles.
+5. **No home screen, shop, end-of-run ruler, reward screen, sound or saving.**
+
+
+
 Per-game truth. Where this and the shared notes disagree, **this file wins.**
 
 | Topic | Status |
