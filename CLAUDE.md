@@ -65,6 +65,45 @@ it produced an **identical** per-candle value across four scripted play styles.
 
 `weaving the pools beats only collecting` is the standing guard on it.
 
+## Four checks, and each answers a different kind of question
+
+```bash
+scripts/check.sh          # all of it, in the order that fails fastest
+```
+
+| | Runs | Answers |
+|---|---|---|
+| `test/run_tests.gd` | headless | is the simulation right |
+| `test/run_smoke.gd` | headless | is the scene built, and is everything WHERE it should be |
+| `test/run_visual.gd` | needs a GPU | is the picture legible |
+| `scripts/check_size.gd` | headless | did the APK move |
+
+**Geometry goes in `run_smoke.gd`, not in `run_visual.gd`.** This was learned the
+expensive way. Two visual bugs - a wax pool rendering striped, and a station sign hung at the
+camera's eye height - were both attacked first as pixel statistics, and three separate metrics
+were written and thrown away because none of them separated a broken build from a healthy one
+by more than a few percent. Both are geometry, and geometry is a NUMBER in the model: the
+pool's y against the stripe tops, the gantry's distance from the lens. In the model they are
+exact, and the failure message says which pool and how far off.
+
+What frame statistics are good for is the whole picture going wrong at once - which the model
+cannot see at all, and which is exactly how the build where every instanced object rendered as
+a solid black silhouette got through with every assertion green.
+
+**Every threshold in `run_visual.gd` is measured and then checked against a deliberately
+broken build.** `-- --report` prints the metrics and asserts nothing. A guard that does not
+move when the bug is present is worse than no guard: it is a green light nobody has any reason
+to doubt.
+
+**`run_visual.gd` is a LOCAL gate and is deliberately not in CI.** CI has no GPU, and the
+software renderer available there is a different one - thresholds derived on Vulkan would have
+to be re-derived on llvmpipe, and two sets of numbers for one check is how a check stops
+meaning anything. Run `scripts/check.sh` before committing.
+
+**`scripts/sheet.gd` is for looking, not for passing.** It renders twelve frames across a
+level into a grid, which is how the wrong things get NOTICED; the checks above are how they
+stay fixed.
+
 ## Invariants
 
 - **`src/sim/` may not reference a Node, a Viewport, an input event or a real frame.** That

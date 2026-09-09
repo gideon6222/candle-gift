@@ -52,6 +52,9 @@ func _initialize() -> void:
 	_check_the_hud(main)
 	_check_the_controls_are_anchored(main)
 	_check_the_level_can_be_left(main)
+	_check_the_palette(main)
+	_check_the_pool_clears_the_stripes(main)
+	_check_no_gantry_is_left_behind(main)
 
 	_finish()
 
@@ -179,6 +182,103 @@ func _check_the_controls_are_anchored(main) -> void:
 ## where the content stops cannot see past the end of the content**, so this one
 ## deliberately drives THROUGH the boundary - and through the real scene, since
 ## the missing code was in the renderer's handler and not in Sim.
+## THE PALETTE, as constants, before anything is drawn.
+##
+## Workshop 2 of the last game on these notes shipped as a pink runway under a
+## pink sky, and the track dissolved into the backdrop at about twenty metres -
+## which is the distance you steer by. It is a property of two colours and needs
+## no rendering to check, so it is checked here rather than in `run_visual.gd`,
+## where the same question comes out as a noisy shade that depends on whether
+## the sampled band happened to land in a wax pool.
+##
+## A MAGNITUDE, not a direction. This game is a pale road under a saturated sky,
+## the opposite way round from the last one and equally legible.
+func _check_the_palette(main) -> void:
+	_t.begin("smoke > the road and the sky cannot be confused")
+	var consts: Dictionary = main.get_script().get_script_constant_map()
+	var road: Color = consts["ROAD"]
+	var sky: Color = consts["SKY"]
+	var sky_top: Color = consts["SKY_TOP"]
+	_t.gt(absf(_lightness(road) - _lightness(sky)), 0.25,
+		"the road and the sky are too close in lightness")
+	_t.gt(absf(_lightness(road) - _lightness(sky_top)), 0.25,
+		"the road and the top of the sky are too close in lightness")
+	## The gradient may go darker toward the top and nowhere else: fading toward
+	## white at the horizon is what puts a white runway against a near-white
+	## backdrop.
+	_t.lt(_lightness(sky_top), _lightness(sky),
+		"the sky gets LIGHTER toward the top, so it approaches the road colour")
+
+
+## The wax has to sit above the lane stripes, and by more than nothing.
+##
+## The stripes are boxes with a height, not decals: their tops are at
+## y = position + height/2, and a pool laid below that has them standing PROUD
+## of it. It renders as wax with white rungs across it, which reads as a
+## transparency bug or as z-fighting and is neither.
+##
+## Checked as a number rather than by looking, because looking is what missed it
+## for a whole build - and because `run_visual.gd` was given two different
+## chances to catch it in pixels and could not separate it from a marbled pool.
+func _check_the_pool_clears_the_stripes(main) -> void:
+	_t.begin("smoke > the wax clears the lane stripes")
+	var stripe_mesh: BoxMesh = main._stripes.multimesh.mesh
+	var stripe_top := 0.02 + stripe_mesh.size.y * 0.5
+	var pools := 0
+	for rig in main._rigs:
+		for h in rig.get_meta("halves"):
+			var liq: MeshInstance3D = h.liquid
+			pools += 1
+			_t.gt(liq.position.y, stripe_top + 0.02,
+				"a wax pool at y=%.3f does not clear the stripe tops at y=%.3f"
+					% [liq.position.y, stripe_top])
+	_t.gt(float(pools), 0.0, "no wax pools were found at all")
+
+
+## No station gantry may be drawn CLOSE TO THE LENS.
+##
+## The pool and the gantry need different cull distances and shared one for a
+## build. The pool is ground and has to outlast the batch standing in it; the
+## gantry is overhead and has to go once it is passed, or a sign a few metres
+## off the camera covers half the road.
+##
+## Stated as a distance from the CAMERA, not from the batch, because that is
+## what the rule is actually about and the camera sits eleven metres further
+## back. Written as "nothing behind the batch" first, this failed on a
+## deliberate one-metre grace that stops the gantry popping out exactly as you
+## cross it - a gantry a metre behind the batch is still eleven metres from the
+## lens and completely harmless. The bug being guarded against culled at five.
+##
+## SIX METRES is the bar: a 2.3 m sign at that range subtends about a fifth of
+## the frame width, and it gets worse fast as it closes.
+##
+## This is the assertion `run_visual.gd` could not make. With the single cull
+## put back, the fraction of the upper frame that is still sky went from 0.869
+## to 0.826 - present, and far too small to set a threshold on. Here it is exact.
+func _check_no_gantry_is_left_behind(main) -> void:
+	_t.begin("smoke > no gantry is drawn close to the lens")
+	var mem := {}
+	var nearest := 1e9
+	var seen := 0
+	for i in 60 * 12:
+		Policies.steer(Policies.WEAVE, main.sim, mem)
+		main.advance(1.0 / 60.0, 1.0 / 60.0)
+		for rig in main._rigs:
+			if not rig.visible:
+				continue
+			for h in rig.get_meta("halves"):
+				var furn: Node3D = h.furn
+				if not furn.visible:
+					continue
+				seen += 1
+				nearest = minf(nearest, rig.position.z - main._cam_z)
+	_t.gt(float(seen), 0.0,
+		"no gantry was drawn at all in twelve seconds, so this proves nothing")
+	_t.gt(nearest, 6.0,
+		"a station gantry was drawn %.1f m from the camera - at that range its "
+			% nearest + "sign covers a fifth of the frame")
+
+
 func _check_the_level_can_be_left(main) -> void:
 	_t.begin("smoke > a finished level starts the next one")
 	main.freeze()
@@ -201,6 +301,10 @@ func _check_the_level_can_be_left(main) -> void:
 	var before: float = main.sim.distance
 	main.advance(1.0, 1.0 / 60.0)
 	_t.gt(main.sim.distance, before, "the next level does not advance when the frame loop runs")
+
+
+func _lightness(c: Color) -> float:
+	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 
 
 func _live(items: Array[Dictionary]) -> int:

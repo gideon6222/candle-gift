@@ -81,6 +81,35 @@ A 0.3% difference, which is the toolchain.
 **A number from before a change is not a baseline for after it.** The comparison that mattered
 was CI-to-CI, and there was only one CI build to compare at the time.
 
+### The testing pass, 2026-09-09
+
+Three candidate pixel metrics were written and thrown away, which is the finding worth keeping:
+
+| Metric | Good build | Broken build | Verdict |
+|---|---|---|---|
+| colour changes across a row | 45 | 49 (striped pool) | useless |
+| saturated runs across five rows | 7 | 8 (striped pool) | useless |
+| fraction of upper frame still sky | 0.869 | 0.826 (sign at eye height) | too weak |
+| **fraction of lower frame near-black** | **0.028** | **0.196** (everything inked) | **kept** |
+
+The two bugs that resisted are both GEOMETRY, and they moved to `run_smoke.gd` where the answer
+is a number: `_check_the_pool_clears_the_stripes` compares the pool's y against the stripe
+boxes' tops, and `_check_no_gantry_is_left_behind` tracks the nearest visible gantry to the
+LENS across twelve seconds of play. Both were verified by reintroducing the original bug and
+watching them fail with a message that names the number.
+
+Also learned: **five sampled seconds is not a sweep.** The first version of `run_visual.gd`
+checked five chosen moments and missed the very bug it was written for, because a station sign
+only fills the frame for about a second after the batch passes under it. It now samples every
+1.5 s across the level and judges the worst frame. Transient is exactly what a chosen-moment
+check cannot see, and transient is most of what is wrong with a runner.
+
+And: **`_check_no_gantry_is_left_behind` was wrong on its first draft** in an instructive way.
+Written as "no gantry behind the batch", it failed on a deliberate one-metre grace that stops
+the gantry popping out as you cross it. A gantry a metre behind the batch is eleven metres from
+the camera and harmless; the rule is about distance from the LENS. Stating a guard in terms of
+the thing it is really about is what stops it failing on correct changes.
+
 ### Still wrong, in the order the sheet shows them
 
 1. **Obstacles are placeholders.** The roller is a giant gold cylinder that reads as a
