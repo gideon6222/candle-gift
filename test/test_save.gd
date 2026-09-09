@@ -119,3 +119,51 @@ func test_a_save_that_is_not_an_array_falls_back_to_owning_nothing(t: TestHarnes
 	f = null
 	var s := Save.load_state()
 	t.eq(s.owned, [], "a non-array owned field was not rejected")
+
+
+## SETTINGS ARE A DIFFERENT FILE, and this is the assertion that keeps them so.
+##
+## The pause screen offers to erase your progress next to switches that control
+## sound. Wiping the save must not silence the game, and turning the music off
+## must not be able to touch a coin.
+func test_settings_and_progress_do_not_share_a_file(t: TestHarness) -> void:
+	t.ok(Settings.PATH != Save.PATH, "settings and progress share a file")
+	Save._reset_latch_for_tests()
+	Settings.wipe()
+	Save.store({"cash": 999.0, "level": 3})
+	Settings.store({"sound": false, "music": false})
+
+	var s := Save.load_state()
+	t.approx(s.cash, 999.0, 0.01, "writing settings disturbed the save")
+	t.eq(s.level, 3, "writing settings disturbed the save")
+
+	## And erasing progress leaves the preferences alone.
+	Save.wipe()
+	var prefs := Settings.load_state()
+	t.eq(prefs.sound, false, "wiping the save also reset the sound switch")
+	t.eq(prefs.music, false, "wiping the save also reset the music switch")
+	Save._reset_latch_for_tests()
+
+
+## A SWITCH DEFAULTS ON, and a file written before the switch existed must not
+## read as it being off.
+##
+## The trap is testing truthiness instead of `== false`: a missing key and a key
+## explicitly set to false look identical to `if not d.get(k)`, so everyone
+## upgrading silently gets the switch turned off.
+func test_a_settings_key_added_later_defaults_on(t: TestHarness) -> void:
+	Settings.wipe()
+	var f := FileAccess.open(Settings.PATH, FileAccess.WRITE)
+	f.store_string('{"sound": false}')
+	f = null
+	var s := Settings.load_state()
+	t.eq(s.sound, false, "an explicit false was not respected")
+	t.eq(s.music, true, "a key the file has never heard of read as OFF")
+
+
+func test_settings_survive_a_round_trip(t: TestHarness) -> void:
+	Settings.wipe()
+	Settings.store({"sound": false, "music": true})
+	var s := Settings.load_state()
+	t.eq(s.sound, false, "sound did not survive a round trip")
+	t.eq(s.music, true, "music did not survive a round trip")

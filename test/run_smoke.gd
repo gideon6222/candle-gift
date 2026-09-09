@@ -105,6 +105,8 @@ func _run(main) -> void:
 	_check_a_tap_on_a_card_does_not_start_the_run(main)
 	_check_progress_is_saved(main)
 	await _check_the_shop_sells_shops(main)
+	await _check_the_pause_panel(main)
+	_check_every_sound_exists(main)
 
 	_finish()
 
@@ -548,6 +550,102 @@ func _check_the_shop_sells_shops(main) -> void:
 	var back: Button = main._shop.get_child(main._shop.get_child_count() - 1)
 	_press(back)
 	_t.eq(main._phase, main.Phase.HOME, "leaving the shop did not go back to the home screen")
+
+
+## THE GEAR OPENS THE PAUSE PANEL, and the panel keeps two promises that are
+## about two different files.
+func _check_the_pause_panel(main) -> void:
+	_t.begin("smoke > the gear pauses, and the panel does what it says")
+	Save._reset_latch_for_tests()
+	Settings.wipe()
+	## RESET WHAT THE SCENE IS HOLDING, not just what is on disk.
+	##
+	## The scene read its preferences at boot, and an earlier case in this
+	## same suite had already written a file with the sound off - so
+	## 'sound starts on' was false for a reason that had nothing to do with
+	## the code under test. A check that depends on what the case before it
+	## left on disk is a check that fails in isolation or passes in the
+	## wrong order, and either way it is not testing what it says.
+	main._prefs = Settings.load_state()
+	main._sfx.enabled = bool(main._prefs.sound)
+	main._sfx.set_music(bool(main._prefs.music))
+	main.freeze()
+	main.advance(4.0, 1.0 / 60.0)
+	_t.eq(main._phase, main.Phase.RUN, "the harness is not in a run, so pausing proves nothing")
+
+	var at: Vector2 = main._gear.get_global_rect().get_center()
+	var e := InputEventMouseButton.new()
+	e.button_index = MOUSE_BUTTON_LEFT
+	e.pressed = true
+	e.position = at
+	main.get_viewport().push_input(e, true)
+	await _settle()
+	_t.eq(main._phase, main.Phase.PAUSED, "tapping the gear did not pause")
+	_t.ok(main._pause.visible, "paused, but the panel is not on screen")
+
+	## PAUSING STOPS THE WORLD. Anything else is a menu the game keeps playing
+	## behind, and the player comes back to a run they have already lost.
+	var at_z: float = main.sim.distance
+	main.advance(1.0, 1.0 / 60.0)
+	_t.eq(main.sim.distance, at_z, "the world kept running while paused")
+
+	## The switches control the two things they name, and they persist.
+	_t.eq(main._sfx.enabled, true, "sound did not start on")
+	_press(main._sound_button)
+	_t.eq(main._sfx.enabled, false, "the sound switch did not turn the sound off")
+	_t.eq(Settings.load_state().sound, false, "the sound switch was not saved")
+	_t.eq(main._sound_button.text.contains("OFF"), true, "the switch does not say it is off")
+
+	_press(main._music_button)
+	_t.eq(main._sfx.music_enabled, false, "the music switch did not turn the music off")
+	_t.eq(Settings.load_state().music, false, "the music switch was not saved")
+
+	## CLEARING THE SAVE TAKES TWO TAPS. One tap next to two switches is a run of
+	## progress gone to a mis-tap, and there is nothing behind it.
+	main._state.cash = 4321.0
+	main._state.owned = [Shops.ONLINE]
+	Save.store(main._state)
+	_press(main._wipe_button)
+	_t.eq(main._wipe_armed, true, "the first tap on CLEAR did not arm it")
+	_t.eq(main._wipe_button.text.contains("AGAIN"), true, "an armed wipe does not say so")
+	_t.approx(float(Save.load_state().cash), 4321.0, 0.01,
+		"one tap on CLEAR erased the save")
+
+	## And anything else on the panel disarms it, so the second tap has to be a
+	## deliberate second tap rather than the next thing the thumb does.
+	_press(main._sound_button)
+	_t.eq(main._wipe_armed, false, "touching another control left the wipe armed")
+	_press(main._wipe_button)
+	_press(main._wipe_button)
+	_t.approx(float(Save.load_state().cash), 0.0, 0.01, "two taps on CLEAR did not erase")
+	_t.eq(Save.load_state().owned.size(), 0, "the shops survived a wipe")
+	_t.eq(main.sim.cash, 0.0, "the wipe did not reach the running game")
+	_t.eq(main._phase, main.Phase.HOME, "erasing progress did not return to the home screen")
+
+	## A WIPE CANNOT BE UNDONE BY THE SAVE THAT FOLLOWS IT. The game stores on
+	## losing focus, and "clear my progress" is followed within a frame by
+	## exactly that.
+	Save.store({"cash": 9999.0, "level": 8})
+	_t.approx(float(Save.load_state().cash), 0.0, 0.01,
+		"a save after the wipe put the progress back")
+
+	## PREFERENCES ARE NOT PROGRESS: erasing the save left the switches alone.
+	_t.eq(Settings.load_state().music, false, "wiping the save reset the music switch")
+	Save._reset_latch_for_tests()
+
+
+## Sound is synthesised, so there is a real thing to assert about it: that every
+## name the game plays exists. A misspelt name is silence, and silence is not an
+## error - it is the sound of a game that has no sound yet.
+func _check_every_sound_exists(main) -> void:
+	_t.begin("smoke > every sound the game asks for was built")
+	var built: Array = main._sfx.names()
+	_t.gt(float(built.size()), 0.0, "no sounds were built at all")
+	for name in [Sfx.PICKUP, Sfx.CASH, Sfx.HIT, Sfx.STAND, Sfx.BUY, Sfx.DENY, Sfx.FINISH]:
+		_t.ok(built.has(name), "the sound '%s' is played but was never built" % name)
+	for layer in Tuning.MAX_LAYERS:
+		_t.ok(built.has("%s_%d" % [Sfx.DIP, layer]),
+			"there is no dip sound for layer %d" % layer)
 
 
 ## Driving a control the way a thumb does, rather than calling its handler.

@@ -13,7 +13,13 @@ step () {
 	local name="$1"; shift
 	local out
 	out=$("$@" 2>&1 | tr -d '\r')
-	if [ $? -ne 0 ] || echo "$out" | grep -q "FAILED\|SCRIPT ERROR\|Parse Error"; then
+	# AN ENGINE ERROR IS A FAILURE, even when every assertion passed.
+	#
+	# The suite printed "Playback can only happen when a node is inside the
+	# scene tree" and reported itself green in the same breath. An error nobody
+	# has to act on is an error everyone learns to scroll past, and the next one
+	# under it is the real one.
+	if [ $? -ne 0 ] || echo "$out" | grep -qE "FAILED|SCRIPT ERROR|Parse Error|^ERROR:"; then
 		echo "FAIL  $name"
 		echo "$out" | grep -E "FAIL|ERROR" | head -12
 		fail=1

@@ -8,9 +8,12 @@ extends RefCounted
 ## inside the app's private storage, so it survives an update and goes away with
 ## an uninstall.
 ##
-## PREFERENCES ARE NOT PROGRESS and will not share this file when they arrive.
-## A settings panel offers to erase your progress next to switches that control
-## sound, and that promise only holds if the two are separate things.
+## PREFERENCES ARE NOT PROGRESS and do not share this file - `settings.gd` owns
+## its own. A settings panel offers to erase your progress next to switches that
+## control sound, and that promise only holds if the two are separate things.
+##
+## The defensive reading lives in `store.gd`. Both files need it, and writing it
+## twice means fixing it once and forgetting the other.
 
 const PATH := "user://candlegift.v1.json"
 
@@ -41,54 +44,10 @@ static var _wiped := false
 
 
 static func load_state() -> Dictionary:
-	var out := DEFAULTS.duplicate()
-	if not FileAccess.file_exists(PATH):
-		return out
-	var f := FileAccess.open(PATH, FileAccess.READ)
-	if f == null:
-		return out
-	## `JSON.parse_string` pushes an engine error on bad input, so a test that
-	## deliberately corrupts the file prints a stack trace while passing. A
-	## suite that prints errors when it is healthy teaches everyone to skip
-	## past errors. The instance form returns a code instead.
-	var json := JSON.new()
-	if json.parse(f.get_as_text()) != OK:
-		return out
-	if typeof(json.data) != TYPE_DICTIONARY:
-		return out
-	var d: Dictionary = json.data
-	for k in DEFAULTS:
-		if not d.has(k):
-			continue
-		## Coerced to the type of the DEFAULT rather than trusted.
-		##
-		## JSON has one number type, so every int in the file comes back as a
-		## float and `level` becomes 3.0 - which is truthy, prints as "3", and
-		## then indexes an array as 3.0 and fails somewhere else entirely.
-		var want := typeof(DEFAULTS[k])
-		var got: Variant = d[k]
-		match want:
-			TYPE_FLOAT:
-				if got is float or got is int:
-					out[k] = float(got)
-			TYPE_INT:
-				if got is float or got is int:
-					out[k] = int(got)
-			TYPE_BOOL:
-				out[k] = got == true
-			TYPE_ARRAY:
-				## Rebuilt element by element rather than trusted. A hand-edited
-				## or future-version save can put anything in here, and an id that
-				## is not a string would reach `Array.has()` and quietly never
-				## match - so the player would own a shop that grants nothing.
-				if got is Array:
-					var ids: Array = []
-					for v in got:
-						if v is String and not ids.has(v):
-							ids.append(v)
-					out[k] = ids
-			_:
-				out[k] = got
+	var out := Store.read(PATH, DEFAULTS)
+	## Clamped after reading. These three are the ones a corrupt or hand-edited
+	## file can make nonsense of in a way the type coercion cannot catch: a
+	## level of -4 and a negative balance are both perfectly good numbers.
 	out.level = maxi(1, int(out.level))
 	out.cash = maxf(0.0, float(out.cash))
 	out.best = maxf(0.0, float(out.best))
@@ -98,20 +57,12 @@ static func load_state() -> Dictionary:
 static func store(state: Dictionary) -> void:
 	if _wiped:
 		return
-	var out := DEFAULTS.duplicate()
-	for k in DEFAULTS:
-		if state.has(k):
-			out[k] = state[k]
-	var f := FileAccess.open(PATH, FileAccess.WRITE)
-	if f == null:
-		return
-	f.store_string(JSON.stringify(out))
+	Store.write(PATH, DEFAULTS, state)
 
 
 static func wipe() -> void:
 	_wiped = true
-	if FileAccess.file_exists(PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(PATH))
+	Store.erase(PATH)
 
 
 ## For tests, which need a fresh latch per case.

@@ -62,6 +62,14 @@ var _reward_take: Button
 var _shop: Control
 var _shop_rows: VBoxContainer
 var _shop_scroll: ScrollContainer
+var _pause: Control
+var _sound_button: Button
+var _music_button: Button
+var _wipe_button: Button
+var _wipe_armed := false
+var _resume_phase: int = Phase.HOME
+var _sfx: Sfx
+var _prefs := {}
 var _boost_candle: Button
 var _boost_cash: Button
 ## Fredoka, the reference's face: a rounded geometric sans. Loaded once and
@@ -91,7 +99,7 @@ var _booted := false
 ## swipe starts it. So HOME is not "before the game", it is the game with the
 ## simulation not yet advancing - `_sync()` still runs, so what you are looking
 ## at is the level you are about to play.
-enum Phase { HOME, RUN, RULER, REWARD, SHOP }
+enum Phase { HOME, RUN, RULER, REWARD, SHOP, PAUSED }
 
 var _phase: int = Phase.HOME
 var _run_value := 0.0
@@ -157,11 +165,20 @@ func _ensure_booted() -> void:
 		return
 	_booted = true
 	_state = Save.load_state()
+	_prefs = Settings.load_state()
+	_sfx = Sfx.new()
+	add_child(_sfx)
+	_sfx.build()
+	_sfx.enabled = bool(_prefs.sound)
+	_sfx.set_music(bool(_prefs.music))
 	sim = Sim.new()
 	_build_world()
 	sim.level_finished.connect(_on_level_finished)
 	sim.stood_up.connect(_on_stood_up)
 	sim.hit_obstacle.connect(_on_hit)
+	sim.dipped.connect(_on_dipped)
+	sim.picked_up.connect(_on_picked_up)
+	sim.cash_taken.connect(_on_cash_taken)
 	_apply_save()
 	_sync()
 
@@ -667,6 +684,7 @@ func _build_hud() -> void:
 	_build_ruler()
 	_build_reward()
 	_build_shop()
+	_build_pause()
 	_show_screens()
 
 
@@ -772,6 +790,133 @@ func _build_home() -> void:
 	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_style(hint, 40)
 	_home.add_child(hint)
+
+
+## THE PAUSE PANEL, behind the gear.
+##
+## The gear used to restart the level, which was somewhere for it to live rather
+## than a decision. What it needs to be is the one place a player can turn the
+## sound off and get their progress back, and both of those are promises about
+## SEPARATE files - see `save.gd` and `settings.gd`.
+func _build_pause() -> void:
+	_pause = Control.new()
+	_pause.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_pause.mouse_filter = Control.MOUSE_FILTER_STOP
+	_pause.visible = false
+	_pause.draw.connect(_draw_pause_bg)
+	_ui.add_child(_pause)
+
+	var title := Label.new()
+	title.text = "PAUSED"
+	title.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	title.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	title.position = Vector2(0, 280)
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_style(title, 96)
+	_pause.add_child(title)
+
+	var col := VBoxContainer.new()
+	col.set_anchors_preset(Control.PRESET_CENTER)
+	col.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	col.grow_vertical = Control.GROW_DIRECTION_BOTH
+	col.position = Vector2(-300, -180)
+	col.custom_minimum_size = Vector2(600, 0)
+	col.add_theme_constant_override("separation", 30)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pause.add_child(col)
+
+	_sound_button = _button("SOUND", 46)
+	_sound_button.custom_minimum_size = Vector2(600, 120)
+	_sound_button.pressed.connect(_toggle_sound)
+	col.add_child(_sound_button)
+
+	_music_button = _button("MUSIC", 46)
+	_music_button.custom_minimum_size = Vector2(600, 120)
+	_music_button.pressed.connect(_toggle_music)
+	col.add_child(_music_button)
+
+	## TWO TAPS TO ERASE. The first arms it and the label says so; anything else
+	## disarms it. A single tap next to two switches is a run of progress gone
+	## to a mis-tap, and there is no undo behind it.
+	_wipe_button = _button("CLEAR SAVE DATA", 40)
+	_wipe_button.custom_minimum_size = Vector2(600, 120)
+	_wipe_button.pressed.connect(_on_wipe)
+	col.add_child(_wipe_button)
+
+	var resume := _button("RESUME", 52)
+	resume.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	resume.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	resume.position = Vector2(-230, -230)
+	resume.custom_minimum_size = Vector2(460, 130)
+	resume.pressed.connect(_close_pause)
+	_pause.add_child(resume)
+
+
+func _open_pause() -> void:
+	if _phase == Phase.PAUSED:
+		return
+	## Remembered, so pausing during a run resumes the run rather than dropping
+	## the player back to the home screen with a level half played.
+	_resume_phase = _phase
+	_wipe_armed = false
+	_set_phase(Phase.PAUSED)
+
+
+func _close_pause() -> void:
+	_wipe_armed = false
+	_set_phase(_resume_phase)
+
+
+func _refresh_pause() -> void:
+	_sound_button.text = "SOUND   %s" % ("ON" if bool(_prefs.sound) else "OFF")
+	_music_button.text = "MUSIC   %s" % ("ON" if bool(_prefs.music) else "OFF")
+	_wipe_button.text = "TAP AGAIN TO ERASE" if _wipe_armed else "CLEAR SAVE DATA"
+
+
+func _toggle_sound() -> void:
+	_prefs.sound = not bool(_prefs.sound)
+	_sfx.enabled = bool(_prefs.sound)
+	_sfx.set_music(bool(_prefs.music))
+	Settings.store(_prefs)
+	## Disarmed by anything else on the panel, so the second tap has to be a
+	## deliberate second tap rather than the next thing the thumb happens to do.
+	_wipe_armed = false
+	_sfx.play(Sfx.BUY)
+	_refresh_pause()
+
+
+func _toggle_music() -> void:
+	_prefs.music = not bool(_prefs.music)
+	_sfx.set_music(bool(_prefs.music))
+	Settings.store(_prefs)
+	_wipe_armed = false
+	_sfx.play(Sfx.BUY)
+	_refresh_pause()
+
+
+func _on_wipe() -> void:
+	if not _wipe_armed:
+		_wipe_armed = true
+		_sfx.play(Sfx.DENY)
+		_refresh_pause()
+		return
+	Save.wipe()
+	_state = Save.load_state()
+	_wipe_armed = false
+	sim.cash = 0.0
+	sim.boost_candles = 0
+	sim.boost_cash = 1.0
+	sim.restart(1)
+	_apply_save_to_sim()
+	_stand = 0.0
+	_resume_phase = Phase.HOME
+	_sfx.play(Sfx.HIT)
+	_set_phase(Phase.HOME)
+	_sync()
+
+
+func _draw_pause_bg() -> void:
+	_pause.draw_rect(Rect2(Vector2.ZERO, _pause.size), Color(0.129, 0.098, 0.271, 0.94))
 
 
 ## THE SHOP SELLS SHOPS.
@@ -946,6 +1091,7 @@ func _on_shop_drag(event: InputEvent) -> void:
 func _on_buy(id: String) -> void:
 	var owned: Array = _state.get("owned", [])
 	if not Shops.can_buy(owned, sim.cash, id):
+		_sfx.play(Sfx.DENY)
 		return
 	var entry := Shops.by_id(id)
 	sim.cash -= float(entry.price)
@@ -958,6 +1104,7 @@ func _on_buy(id: String) -> void:
 	for k in stats:
 		_state[k] = stats[k]
 	Save.store(_state)
+	_sfx.play(Sfx.BUY)
 	_apply_save_to_sim()
 	_refresh_shop()
 	_sync()
@@ -1046,8 +1193,11 @@ func _show_screens() -> void:
 	_ruler.visible = _phase == Phase.RULER
 	_reward.visible = _phase == Phase.REWARD
 	_shop.visible = _phase == Phase.SHOP
+	_pause.visible = _phase == Phase.PAUSED
 	if _phase == Phase.SHOP:
 		_refresh_shop()
+	if _phase == Phase.PAUSED:
+		_refresh_pause()
 	if _phase == Phase.REWARD:
 		_reward_amount.text = "%s $" % SimUtil.fmt(_run_value)
 		_reward_best.visible = _beat_best
@@ -1069,9 +1219,11 @@ BONUS x1.5
 
 func _on_boost_candles() -> void:
 	if sim.cash < BOOST_PRICE or sim.boost_candles > 0:
+		_sfx.play(Sfx.DENY)
 		return
 	sim.cash -= BOOST_PRICE
 	sim.boost_candles += 1
+	_sfx.play(Sfx.BUY)
 	_state.cash = sim.cash
 	Save.store(_state)
 	## The boost changes what the batch STARTS as, so the level has to be laid
@@ -1090,9 +1242,11 @@ func _on_boost_candles() -> void:
 
 func _on_boost_cash() -> void:
 	if sim.cash < BOOST_PRICE or sim.boost_cash > 1.0:
+		_sfx.play(Sfx.DENY)
 		return
 	sim.cash -= BOOST_PRICE
 	sim.boost_cash = 1.5
+	_sfx.play(Sfx.BUY)
 	_state.cash = sim.cash
 	Save.store(_state)
 	_refresh_boosts()
@@ -1247,11 +1401,10 @@ func _apply_save_to_sim() -> void:
 
 func _on_gear_input(event: InputEvent) -> void:
 	if (event is InputEventScreenTouch or event is InputEventMouseButton) and event.pressed:
-		# Somewhere for settings to live. Until there is a panel, it restarts the
-		# level - which is at least an escape from a run that has gone wrong, and
-		# is the behaviour the smoke test pins.
-		sim.restart(sim.level)
-		_stand = 0.0
+		## It used to restart the level - somewhere for the gear to live rather
+		## than a decision, and a destructive one to hand a player who tapped it
+		## by accident mid-run.
+		_open_pause()
 		_gear.accept_event()
 
 
@@ -1292,6 +1445,7 @@ func _on_level_finished(value: float) -> void:
 	_run_best = float(_state.best)
 	_beat_best = value > _run_best
 	_ruler_t = 0.0
+	_sfx.play(Sfx.FINISH)
 	_set_phase(Phase.RULER)
 
 
@@ -1335,12 +1489,35 @@ func _start_run() -> void:
 	_set_phase(Phase.RUN)
 
 
+func _on_dipped(_kind: int, _x: float, _z: float, _colour: Color) -> void:
+	## Pitched by how many colours are already on the leading candle, so weaving
+	## through four pools plays a rising figure rather than four identical
+	## clicks. The batch dips one candle at a time, and the round-robin voices
+	## turn a whole slab crossing a pool into a chord.
+	var layer := 0
+	if sim.count() > 0:
+		layer = sim.batch[0].layers.size()
+	_sfx.play_dip(layer)
+
+
+func _on_picked_up(_x: float, _z: float) -> void:
+	## Climbs a little with the size of the batch, which is the only feedback
+	## that a run is going well while it is still going.
+	_sfx.play(Sfx.PICKUP, 0.9 + minf(float(sim.count()), 24.0) * 0.02)
+
+
+func _on_cash_taken(_x: float, _z: float) -> void:
+	_sfx.play(Sfx.CASH)
+
+
 func _on_stood_up(_z: float) -> void:
+	_sfx.play(Sfx.STAND)
 	_say("STAND UP")
 
 
 func _on_hit(_kind: String, _x: float, _z: float, n: int) -> void:
 	if n > 0:
+		_sfx.play(Sfx.HIT)
 		_say("-%d" % n)
 
 

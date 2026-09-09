@@ -171,6 +171,43 @@ The rows also have to be `MOUSE_FILTER_IGNORE`. A `Control` defaults to STOP, co
 included, so every row would swallow the gesture and the list would move only when the finger
 happened to land in a gap between two of them.
 
+### Sound and the pause panel, 2026-09-09
+
+**Every sound is synthesised at boot; there are no audio files.** `sfx.gd` builds eight
+`AudioStreamWAV`s from sine waves and a deterministic hash, plus a sixteen-second looping music
+bed. Two reasons, and the second is the real one: a folder of .wav files for eight short blips
+is a folder to keep in step with the code that names them - and a rename that misses one is
+silence, which nothing reports. A sound that is a FUNCTION can take arguments, so `dip` is
+pitched by which layer the candle is on and a batch weaving through four pools plays a rising
+figure rather than four identical clicks.
+
+Eight voices, round-robin. One player restarted on every event cuts its own tail off, and a
+whole slab crossing a pool fires one dip per candle in the same frame - which should be a chord,
+not the last one.
+
+**The gear opens a pause panel** instead of restarting the level. Restarting was somewhere for
+the gear to live rather than a decision, and a destructive one to hand a player who tapped it by
+accident mid-run. The panel keeps two promises about two different files: SOUND and MUSIC live
+in `settings.gd`, CLEAR SAVE DATA erases `save.gd`, and each leaves the other alone.
+
+**Clearing takes two taps, and anything else on the panel disarms it.** One tap next to two
+switches is a run of progress gone to a mis-tap with nothing behind it.
+
+### An engine error is a failure, even when every assertion passes
+
+`scripts/check.sh` now fails on any `ERROR:` line. The suite printed "Playback can only happen
+when a node is inside the scene tree" and reported itself green in the same breath - `set_music`
+was called during boot, before the node was in the tree. An error nobody has to act on is an
+error everyone learns to scroll past, and the next one under it is the real one.
+
+### A test must not depend on what the case before it left on disk
+
+`the gear pauses` asserted that sound starts on, and it was false - because an earlier case in
+the same suite had written a settings file with the sound off, and the scene had read it at
+boot. Wiping the file was not enough; the scene was still holding the old value. A check that
+depends on ordering fails in isolation or passes in the wrong order, and either way it is not
+testing what it says it is.
+
 ### Still to build
 
 The SHOP button says "COMING SOON". The shop sells SHOPS - Online, Scent, Boutique, Luxury -

@@ -33,7 +33,7 @@ func _process(_d: float) -> bool:
 	root.get_texture().get_image().save_png("user://screen_%d.png" % _at)
 	print("  screen %d" % _at)
 	_at += 1
-	if _at > 3:
+	if _at > 4:
 		print("wrote %s" % OS.get_user_data_dir())
 		quit(0)
 		return true
@@ -61,6 +61,13 @@ func _pose(i: int) -> void:
 			_main._ruler_t = 0.72
 			_main._set_phase(_main.Phase.RULER)
 			_main._ruler.queue_redraw()
+		4:   # the pause panel, mid-run
+			_main.freeze()
+			var m2 := {}
+			for n in int(6.0 / STEP):
+				Policies.steer(Policies.WEAVE, _main.sim, m2)
+				_main.advance(STEP, STEP)
+			_main._open_pause()
 		3:   # the shop, with money for the first rung
 			_main.freeze()
 			_main._state.owned = []
