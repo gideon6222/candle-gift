@@ -15,8 +15,20 @@ extends SceneTree
 ## that exact bug has already cost a full tuning pass on another game here.
 
 var _t := TestHarness.new()
+var _main
+var _frames := 0
 
 
+## THE CHECKS RUN AFTER REAL FRAMES, not inside `_initialize`.
+##
+## Control layout is resolved during a frame. With everything done in
+## `_initialize` no frame ever runs, every Control keeps a zero-size rect at the
+## origin, and a test that pushes a click at a button's centre clicks nothing at
+## all - silently, because a click that hits nothing is not an error.
+##
+## That is not a testing detail, it is the difference between asserting a button
+## WORKS and asserting a button EXISTS. Three frames is enough for the layout to
+## settle; `frozen` keeps the simulation still while they pass.
 func _initialize() -> void:
 	var scene: PackedScene = load("res://src/game/main.tscn")
 	_t.begin("smoke > the scene loads")
@@ -25,19 +37,36 @@ func _initialize() -> void:
 		_finish()
 		return
 
-	var main = scene.instantiate()
-	root.add_child(main)
+	_main = scene.instantiate()
+	root.add_child(_main)
 
 	# Freeze first, then step. Real frames run between a scene loading and a
 	# harness taking over, so without this every number would move with the
 	# speed of the machine - and `_ready` has not fired yet either, because
 	# add_child() during SceneTree._initialize() defers it to the first
 	# processed frame. freeze() boots the scene explicitly.
-	main.freeze()
+	_main.freeze()
 
+
+func _process(_delta: float) -> bool:
+	_frames += 1
+	if _frames < 3:
+		return false
+	_run(_main)
+	return true
+
+
+func _run(main) -> void:
 	_t.begin("smoke > the scene builds its world")
 	_t.ok(main.sim != null, "Sim was never created")
 	_t.ok(main.get_node_or_null("Road") != null, "the road is missing from the scene")
+
+	## The layout that the frames above were for. Without a resolved rect every
+	## input-driven assertion below is a click into empty space that passes for
+	## the wrong reason.
+	_t.gt(main._ui.size.x, 0.0, "the UI root has no size, so no control can be clicked")
+	_t.gt(main._reward_take.get_global_rect().size.x, 0.0,
+		"a button has no rect, so pressing it would hit nothing")
 
 	main.advance(12.0)
 	var s: Dictionary = main.sim.state()
@@ -55,6 +84,8 @@ func _initialize() -> void:
 	_check_the_palette(main)
 	_check_the_pool_clears_the_stripes(main)
 	_check_no_gantry_is_left_behind(main)
+	_check_a_tap_on_a_card_does_not_start_the_run(main)
+	_check_progress_is_saved(main)
 
 	_finish()
 
@@ -257,6 +288,7 @@ func _check_the_pool_clears_the_stripes(main) -> void:
 ## to 0.826 - present, and far too small to set a threshold on. Here it is exact.
 func _check_no_gantry_is_left_behind(main) -> void:
 	_t.begin("smoke > no gantry is drawn close to the lens")
+	main.freeze()
 	var mem := {}
 	var nearest := 1e9
 	var seen := 0
@@ -279,8 +311,16 @@ func _check_no_gantry_is_left_behind(main) -> void:
 			% nearest + "sign covers a fifth of the frame")
 
 
+## A FINISHED LEVEL GOES RULER -> REWARD -> HOME -> NEXT RUN, and every step of
+## that is driven here through the same controls a thumb would use.
+##
+## The bug this replaced a simpler test for: `over` went true at the end of the
+## first level, `advance()` returned early from then on, and the game sat frozen
+## with a live HUD - which to the person holding the phone is a crash. Now that
+## there are screens in between, "the next level starts" is four transitions and
+## any one of them can be the one that never fires.
 func _check_the_level_can_be_left(main) -> void:
-	_t.begin("smoke > a finished level starts the next one")
+	_t.begin("smoke > a finished level goes through the screens to the next one")
 	main.freeze()
 	var guard := 0
 	while not main.sim.over and guard < 12000:
@@ -289,18 +329,148 @@ func _check_the_level_can_be_left(main) -> void:
 	_t.eq(main.sim.over, true, "the level never ended")
 	_t.eq(main.sim.standing, true,
 		"the level ended without crossing the ROTATE wall, which spans the track")
+	_t.eq(main._phase, main.Phase.RULER, "finishing a level did not show the money ruler")
+	_t.ok(main._ruler.visible, "the ruler is the phase but is not visible")
+	_t.ok(not main._reward.visible, "the reward screen is up during the ruler")
+
+	## THE RULER MUST NOT ADVANCE THE WORLD. It is a summary of a run that has
+	## finished; a simulation still running under it would keep banking money
+	## while the player watches the total they already earned climb.
+	var frozen_at: float = main.sim.distance
+	main.advance(main.RULER_SECONDS + 0.2, 1.0 / 60.0)
+	_t.eq(main.sim.distance, frozen_at, "the simulation kept running under the ruler")
+	_t.eq(main._phase, main.Phase.REWARD, "the ruler never handed over to the reward screen")
 
 	var level: int = main.sim.level
-	main.advance(main.INTERLUDE_SECONDS + 0.5, 1.0 / 60.0)
-	_t.eq(main.sim.over, false,
-		"the game is still frozen after the interlude - this is the bug that shipped")
-	_t.eq(main.sim.level, level + 1, "finishing a level did not start the next one")
-	_t.eq(main.sim.standing, false, "the next level did not start lying down again")
+	var cash_before: float = main.sim.cash
+	var earned: float = main._run_value
+	_t.gt(earned, 0.0, "the run was worth nothing, so banking it proves nothing")
 
-	# And it has to actually play on the other side.
-	var before: float = main.sim.distance
-	main.advance(1.0, 1.0 / 60.0)
-	_t.gt(main.sim.distance, before, "the next level does not advance when the frame loop runs")
+	_press(main._reward_take)
+	_t.eq(main._phase, main.Phase.HOME, "taking the reward did not return to the home screen")
+	_t.approx(main.sim.cash, cash_before + earned, 0.01,
+		"taking the reward did not bank the money")
+	_t.eq(main.sim.level, level + 1, "taking the reward did not start the next level")
+	_t.eq(main.sim.standing, false, "the next level did not start lying down again")
+	_t.ok(main._home.visible, "the home screen is the phase but is not visible")
+
+	## HOME IS THE GAME WITH THE SIMULATION NOT YET RUNNING. The world is drawn -
+	## the level behind the cards is the one about to be played - but nothing
+	## moves until the swipe.
+	var home_at: float = main.sim.distance
+	main.advance(0.5, 1.0 / 60.0)
+	_t.eq(main.sim.distance, home_at, "the world is running while the home screen is up")
+
+	_swipe(main, 30.0)
+	_t.eq(main._phase, main.Phase.RUN, "a swipe on the world did not start the run")
+	main.advance(0.5, 1.0 / 60.0)
+	_t.gt(main.sim.distance, home_at, "the run started but the world does not advance")
+
+
+## THE BUG THAT SHIPPED TWICE on the last game: a control drawn over the world
+## that the world's own input handler also answers, so tapping "buy" started the
+## run instead of buying anything.
+##
+## Godot makes this structurally harder - steering lives in `_unhandled_input`,
+## so an event a control consumes never reaches it - but "harder" is not
+## "cannot". The way it comes back is a container with the wrong mouse filter
+## swallowing the tap before the button sees it, or a button that never got
+## MOUSE_FILTER_STOP. Both are exactly what this asserts.
+func _check_a_tap_on_a_card_does_not_start_the_run(main) -> void:
+	_t.begin("smoke > the boost cards can be tapped without starting the run")
+	main.freeze()
+	main._set_phase(main.Phase.HOME)
+	main.sim.cash = 5000.0
+	main._state.cash = 5000.0
+	main._refresh_boosts()
+
+	_t.eq(main._home.mouse_filter, Control.MOUSE_FILTER_IGNORE,
+		"the home container swallows input, so the swipe that starts a run cannot reach the world")
+	for b in [main._boost_candle, main._boost_cash, main._reward_take]:
+		_t.eq(b.mouse_filter, Control.MOUSE_FILTER_STOP,
+			"a button does not consume its own touches, so one gesture drives two things")
+
+	var before: int = main.sim.boost_candles
+	_press(main._boost_candle)
+	_t.eq(main.sim.boost_candles, before + 1, "the CANDLE card did not buy anything")
+	_t.eq(main._phase, main.Phase.HOME, "buying a boost started the run")
+	_t.approx(main.sim.cash, 4500.0, 0.01, "the CANDLE card did not charge for itself")
+	_t.eq(main.sim.count(), Tuning.START_CANDLES + 1,
+		"the extra candle was bought but the batch does not have it - the level was "
+		+ "not laid out again")
+
+	_press(main._boost_cash)
+	_t.approx(main.sim.boost_cash, 1.5, 0.001, "the CASH card did not apply its bonus")
+	_t.eq(main._phase, main.Phase.HOME, "buying a boost started the run")
+
+	## And a card you cannot afford does nothing at all.
+	main.sim.cash = 0.0
+	main._state.cash = 0.0
+	main.sim.boost_candles = 0
+	main._refresh_boosts()
+	_press(main._boost_candle)
+	_t.eq(main.sim.boost_candles, 0, "a boost was bought with no money")
+	_t.approx(main.sim.cash, 0.0, 0.01, "money went negative buying a boost")
+
+
+## Progress has to survive being put down.
+func _check_progress_is_saved(main) -> void:
+	_t.begin("smoke > progress survives a reload")
+	Save._reset_latch_for_tests()
+	main.freeze()
+	main._state.cash = 777.0
+	main._state.level = 4
+	main._state.best = 12345.0
+	main._state.press_level = 2
+	Save.store(main._state)
+
+	var reloaded := Save.load_state()
+	_t.approx(float(reloaded.cash), 777.0, 0.01, "cash did not survive")
+	_t.eq(int(reloaded.level), 4, "level did not survive")
+	_t.eq(int(reloaded.press_level), 2, "an upgrade did not survive")
+
+	## `sim.restart` knows nothing about the save, so anything that restarts a
+	## level has to reapply it. A level restarted without that silently drops
+	## every upgrade the player owns, which looks like the shop not working.
+	main._state = reloaded
+	main.sim.restart(4)
+	main._apply_save_to_sim()
+	_t.eq(main.sim.press_level, 2, "restarting a level dropped a bought upgrade")
+
+
+## Driving a control the way a thumb does, rather than calling its handler.
+##
+## `emit_signal("pressed")` would pass even if the button were off-screen, behind
+## something, or not accepting input at all - which is most of what can go wrong
+## with a control. This goes through the viewport so the hit test is real.
+func _press(b: Button) -> void:
+	var at := b.get_global_rect().get_center()
+	for pressed in [true, false]:
+		var e := InputEventMouseButton.new()
+		e.button_index = MOUSE_BUTTON_LEFT
+		e.pressed = pressed
+		e.position = at
+		e.global_position = at
+		## `in_local_coords = true`, and it is the whole trick.
+		## Without it the viewport transforms the position by its own canvas
+		## transform and the click lands nowhere - and a click that hits nothing
+		## is NOT an error, so the test goes green having proved nothing. Measured
+		## on a bare Button under the root: zero presses without it, one with.
+		b.get_viewport().push_input(e, true)
+
+
+func _swipe(main, dx: float) -> void:
+	var vp: Viewport = main.get_viewport()
+	var at: Vector2 = vp.get_visible_rect().size * 0.5
+	var down := InputEventMouseButton.new()
+	down.button_index = MOUSE_BUTTON_LEFT
+	down.pressed = true
+	down.position = at
+	vp.push_input(down, true)
+	var move := InputEventMouseMotion.new()
+	move.position = at + Vector2(dx, 0)
+	move.relative = Vector2(dx, 0)
+	vp.push_input(move, true)
 
 
 func _lightness(c: Color) -> float:

@@ -53,6 +53,14 @@ var _level_pill: Label
 var _money_pill: Label
 var _gear: Control
 var _toast: Label
+var _home: Control
+var _ruler: Control
+var _reward: Control
+var _reward_amount: Label
+var _reward_best: Label
+var _reward_take: Button
+var _boost_candle: Button
+var _boost_cash: Button
 ## Fredoka, the reference's face: a rounded geometric sans. Loaded once and
 ## shared - a Label that falls back to the engine default is the single most
 ## obvious way a screen stops looking like the game it is copying.
@@ -73,13 +81,30 @@ var _cam_z := 0.0
 
 var _dragging := false
 var _booted := false
+## A RUN IS FOUR PHASES, and every screen in the game is one of them.
+##
+## The reference has no menu that stops the world: between runs the player sits
+## ON the runway with the level already built behind the cards, and the first
+## swipe starts it. So HOME is not "before the game", it is the game with the
+## simulation not yet advancing - `_sync()` still runs, so what you are looking
+## at is the level you are about to play.
+enum Phase { HOME, RUN, RULER, REWARD }
+
+var _phase: int = Phase.HOME
+var _run_value := 0.0
+var _run_best := 0.0
+var _beat_best := false
+var _ruler_t := 0.0
 var _interlude := 0.0
+var _state := {}
 
 ## Set by the headless harness. When true the frame loop does not step the sim,
 ## so `advance()` is the only thing moving time and results do not depend on how
 ## fast the machine boots.
 var frozen := false
 
+## How long the batch takes to climb the money ruler.
+const RULER_SECONDS := 2.6
 const INTERLUDE_SECONDS := 2.4
 
 # --- the palette, in one place -------------------------------------------
@@ -93,6 +118,9 @@ const SKY_TOP := Color(0.035, 0.463, 0.827)
 ## The gold of the HUD pills, and the dark line around them.
 const PILL := Color(1.000, 0.769, 0.078)
 const NOTE := Color(0.180, 0.686, 0.353)
+## The reward card is a full-screen magenta modal in the reference.
+const MODAL := Color(0.784, 0.098, 0.427)
+const BOOST_PRICE := 500.0
 const ROAD := Color(0.949, 0.933, 0.984)
 const STRIPE := Color(0.878, 0.831, 0.957)
 const RAIL := Color(0.690, 0.478, 0.894)
@@ -125,11 +153,13 @@ func _ensure_booted() -> void:
 	if _booted:
 		return
 	_booted = true
+	_state = Save.load_state()
 	sim = Sim.new()
 	_build_world()
 	sim.level_finished.connect(_on_level_finished)
 	sim.stood_up.connect(_on_stood_up)
 	sim.hit_obstacle.connect(_on_hit)
+	_apply_save()
 	_sync()
 
 
@@ -630,6 +660,11 @@ func _build_hud() -> void:
 	_toast.modulate.a = 0.0
 	_ui.add_child(_toast)
 
+	_build_home()
+	_build_ruler()
+	_build_reward()
+	_show_screens()
+
 
 ## A HUD PILL: a gold lozenge with a dark line round it and white bold text,
 ## which is what the reference has. Ours was white text floating on the sky.
@@ -696,6 +731,221 @@ func _draw_note(c: Control) -> void:
 	c.draw_circle(mid, minf(r.size.x, r.size.y) * 0.22, Color(0.86, 0.96, 0.89))
 
 
+## THE HOME SCREEN IS ON THE RUNWAY.
+##
+## Not a sheet over a paused game: the level is already built behind these cards
+## and the first swipe starts it. The reference has a SHOP button on the right
+## edge, two boost cards in the middle, and a swipe hint under them - and that
+## is the whole of it.
+func _build_home() -> void:
+	_home = Control.new()
+	_home.set_anchors_preset(Control.PRESET_FULL_RECT)
+	## IGNORE on the container, STOP on each control.
+	##
+	## A full-rect panel that swallows input would eat the swipe that starts the
+	## run - the swipe has to reach the world THROUGH this screen. So the
+	## container is transparent to input and only the buttons take it.
+	_home.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ui.add_child(_home)
+
+	var shop := _button("SHOP", 40)
+	shop.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	shop.position = Vector2(-260, -120)
+	shop.custom_minimum_size = Vector2(200, 200)
+	shop.pressed.connect(_on_shop)
+	_home.add_child(shop)
+
+	_boost_candle = _card("CANDLE", "EXTRA +1", PINK, Vector2(-330, 430))
+	_boost_candle.pressed.connect(_on_boost_candles)
+	_boost_cash = _card("CASH", "BONUS x1.5", NOTE, Vector2(30, 430))
+	_boost_cash.pressed.connect(_on_boost_cash)
+
+	var hint := Label.new()
+	hint.text = "< SWIPE TO START >"
+	hint.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	hint.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	hint.position = Vector2(0, 820)
+	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_style(hint, 40)
+	_home.add_child(hint)
+
+
+## The money ruler: an absolute scale with your own best marked on it, which the
+## finished batch climbs. Not a fraction of a target, and no stars.
+func _build_ruler() -> void:
+	_ruler = Control.new()
+	_ruler.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_ruler.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ruler.draw.connect(_draw_ruler)
+	_ruler.visible = false
+	_ui.add_child(_ruler)
+
+
+func _build_reward() -> void:
+	_reward = Control.new()
+	_reward.set_anchors_preset(Control.PRESET_FULL_RECT)
+	## STOP, unlike the home screen: this one is a modal and nothing behind it
+	## should be steerable while it is up.
+	_reward.mouse_filter = Control.MOUSE_FILTER_STOP
+	_reward.visible = false
+	_reward.draw.connect(_draw_reward_bg)
+	_ui.add_child(_reward)
+
+	_reward_amount = Label.new()
+	_reward_amount.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_reward_amount.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_reward_amount.position = Vector2(0, 420)
+	_style(_reward_amount, 132)
+	_reward.add_child(_reward_amount)
+
+	_reward_best = Label.new()
+	_reward_best.text = "NEW HIGH SCORE!"
+	_reward_best.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_reward_best.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_reward_best.position = Vector2(0, 590)
+	_style(_reward_best, 52)
+	_reward_best.add_theme_color_override("font_color", PILL)
+	_reward.add_child(_reward_best)
+
+	## NO MULTIPLIER FAN. The reference's is a rewarded-video wheel, and this
+	## game has no ads - a spinner that always lands on x1 is a worse screen
+	## than no spinner. Gideon asked for the plain amount and a continue button.
+	_reward_take = _button("TAKE", 56)
+	_reward_take.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_reward_take.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_reward_take.position = Vector2(-230, -320)
+	_reward_take.custom_minimum_size = Vector2(460, 130)
+	_reward_take.pressed.connect(_take_reward)
+	_reward.add_child(_reward_take)
+
+
+## One place that decides what is on screen, driven by the phase.
+##
+## Every screen's visibility is set here on EVERY transition, rather than each
+## handler turning off the one it knows about. A screen left visible by a
+## transition nobody thought about is the classic version of this bug, and it
+## cannot happen if the answer is recomputed from the phase.
+## THE ONLY PLACE THE PHASE CHANGES, so it cannot change without the screens
+## following it.
+##
+## Assigning `_phase` directly and calling `_show_screens()` next to it worked
+## everywhere except `freeze()`, which set the phase to RUN and left the home
+## screen drawn over the whole game. The visual check found it - the fraction of
+## the upper frame that was still sky fell from 0.87 to 0.62 - and no model
+## assertion could have, because every number was right and the picture was not.
+func _set_phase(p: int) -> void:
+	_phase = p
+	_show_screens()
+
+
+func _show_screens() -> void:
+	if _home == null:
+		return
+	_home.visible = _phase == Phase.HOME
+	_ruler.visible = _phase == Phase.RULER
+	_reward.visible = _phase == Phase.REWARD
+	if _phase == Phase.REWARD:
+		_reward_amount.text = "%s $" % SimUtil.fmt(_run_value)
+		_reward_best.visible = _beat_best
+		_reward_take.text = "TAKE %s" % SimUtil.fmt(_run_value)
+	if _phase == Phase.HOME:
+		_refresh_boosts()
+
+
+func _refresh_boosts() -> void:
+	_boost_candle.text = "CANDLE
+EXTRA +1
+%s $" % SimUtil.fmt(BOOST_PRICE)
+	_boost_cash.text = "CASH
+BONUS x1.5
+%s $" % SimUtil.fmt(BOOST_PRICE)
+	_boost_candle.disabled = sim.cash < BOOST_PRICE or sim.boost_candles > 0
+	_boost_cash.disabled = sim.cash < BOOST_PRICE or sim.boost_cash > 1.0
+
+
+func _on_boost_candles() -> void:
+	if sim.cash < BOOST_PRICE or sim.boost_candles > 0:
+		return
+	sim.cash -= BOOST_PRICE
+	sim.boost_candles += 1
+	_state.cash = sim.cash
+	Save.store(_state)
+	## The boost changes what the batch STARTS as, so the level has to be laid
+	## out again for it to be there when the run begins.
+	##
+	## AND THE SAVE HAS TO GO BACK ON AFTERWARDS. `Sim.restart` zeroes cash -
+	## it is per-run state as far as the simulation is concerned - so without
+	## this, buying a boost spent 500 and then wiped the rest of the player's
+	## money on the way out. Anything that restarts a level owes it the save.
+	sim.restart(sim.level)
+	_apply_save_to_sim()
+	_stand = 0.0
+	_refresh_boosts()
+	_sync()
+
+
+func _on_boost_cash() -> void:
+	if sim.cash < BOOST_PRICE or sim.boost_cash > 1.0:
+		return
+	sim.cash -= BOOST_PRICE
+	sim.boost_cash = 1.5
+	_state.cash = sim.cash
+	Save.store(_state)
+	_refresh_boosts()
+	_sync()
+
+
+func _on_shop() -> void:
+	_say("SHOP COMING SOON")
+
+
+func _card(title: String, caption: String, tint: Color, at: Vector2) -> Button:
+	var b := _button("%s
+%s" % [title, caption], 38)
+	b.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	b.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	b.position = at
+	b.custom_minimum_size = Vector2(300, 340)
+	var sb: StyleBoxFlat = b.get_theme_stylebox("normal").duplicate()
+	sb.bg_color = tint
+	b.add_theme_stylebox_override("normal", sb)
+	b.add_theme_stylebox_override("hover", sb)
+	b.add_theme_stylebox_override("pressed", sb)
+	_home.add_child(b)
+	return b
+
+
+## Every button in the game, so they cannot drift apart.
+func _button(text: String, font: int) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.mouse_filter = Control.MOUSE_FILTER_STOP
+	b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = PILL
+	sb.border_color = INK
+	sb.set_border_width_all(6)
+	sb.set_corner_radius_all(28)
+	sb.content_margin_left = 18.0
+	sb.content_margin_right = 18.0
+	sb.content_margin_top = 14.0
+	sb.content_margin_bottom = 16.0
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		b.add_theme_stylebox_override(state, sb)
+	_style(b, font)
+	return b
+
+
+func _style(c: Control, font: int) -> void:
+	c.add_theme_font_size_override("font_size", font)
+	c.add_theme_color_override("font_color", Color.WHITE)
+	c.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.45))
+	c.add_theme_color_override("font_outline_color", INK)
+	c.add_theme_constant_override("outline_size", 10)
+	if _font != null:
+		c.add_theme_font_override("font", _font)
+
+
 func _draw_gear() -> void:
 	var c := Vector2(56, 56)
 	_gear.draw_circle(c, 52, Color(1, 1, 1, 0.92))
@@ -705,6 +955,84 @@ func _draw_gear() -> void:
 		var a := TAU * float(i) / 6.0
 		_gear.draw_line(c + Vector2(cos(a), sin(a)) * 24.0,
 			c + Vector2(cos(a), sin(a)) * 40.0, Color(0.48, 0.42, 0.55), 9.0)
+
+
+## THE RULER IS ABSOLUTE MONEY with your own best marked on it in yellow.
+##
+## Not a fraction of a target and not a star rating - those were ours. What makes
+## a level mean something in the reference is beating the number you got last
+## time, and that only works if the scale is money you recognise.
+func _draw_ruler() -> void:
+	var size := _ruler.size
+	var x := size.x * 0.62
+	var top := size.y * 0.22
+	var bottom := size.y * 0.76
+	var span := bottom - top
+
+	## The scale runs to whichever is larger, so a run that smashes the best is
+	## still on the ruler and a first run has somewhere to climb to.
+	var top_value: float = maxf(maxf(_run_value, _run_best), 1.0) * 1.25
+	var bar := Rect2(Vector2(x, top), Vector2(74, span))
+	_ruler.draw_rect(bar.grow(6.0), INK)
+	_ruler.draw_rect(bar, Color(0.98, 0.98, 1.0))
+
+	var ticks := 6
+	for i in range(ticks + 1):
+		var f := float(i) / float(ticks)
+		var ty := bottom - span * f
+		_ruler.draw_line(Vector2(x - 22, ty), Vector2(x, ty), INK, 5.0)
+		if _font != null:
+			_ruler.draw_string(_font, Vector2(x - 240, ty + 14),
+				SimUtil.fmt(top_value * f), HORIZONTAL_ALIGNMENT_RIGHT, 220, 40, INK)
+
+	## The climb, eased, so the last few hundred slow down as they arrive.
+	var eased := 1.0 - pow(1.0 - _ruler_t, 3.0)
+	var shown := _run_value * eased
+	var fill := span * clampf(shown / top_value, 0.0, 1.0)
+	_ruler.draw_rect(Rect2(Vector2(x + 4, bottom - fill), Vector2(66, fill)), NOTE)
+
+	## THE BEST BAND GOES ON AFTER THE FILL. Drawn before it, the bar climbs over
+	## the top of the one thing the whole screen is about - the mark you are
+	## trying to beat - and it disappears at exactly the moment it starts to
+	## matter. Its label sits clear of the bar on the left for the same reason.
+	if _run_best > 0.0:
+		var by := bottom - span * clampf(_run_best / top_value, 0.0, 1.0)
+		_ruler.draw_rect(Rect2(Vector2(x - 26, by - 9), Vector2(132, 18)), PILL)
+		_ruler.draw_rect(Rect2(Vector2(x - 26, by - 9), Vector2(132, 18)), INK, false, 4.0)
+		if _font != null:
+			_ruler.draw_string(_font, Vector2(x - 250, by - 16), "BEST",
+				HORIZONTAL_ALIGNMENT_RIGHT, 220, 34, INK)
+
+	var my := bottom - fill
+	_ruler.draw_rect(Rect2(Vector2(x + 86, my - 30), Vector2(210, 60)), NOTE)
+	_ruler.draw_rect(Rect2(Vector2(x + 86, my - 30), Vector2(210, 60)), INK, false, 5.0)
+	if _font != null:
+		_ruler.draw_string(_font, Vector2(x + 100, my + 16), SimUtil.fmt(shown),
+			HORIZONTAL_ALIGNMENT_LEFT, 190, 44, Color.WHITE)
+
+
+func _draw_reward_bg() -> void:
+	_reward.draw_rect(Rect2(Vector2.ZERO, _reward.size), MODAL)
+
+
+## The save is the source of truth for progress; the sim is where it is spent.
+func _apply_save() -> void:
+	sim.cash = float(_state.cash)
+	sim.restart(int(_state.level))
+	_apply_save_to_sim()
+
+
+## Called after every `sim.restart`, because restart does not know about the
+## save - and a level restarted without this quietly drops every upgrade the
+## player has bought, which looks like the shop not working.
+func _apply_save_to_sim() -> void:
+	if _state.is_empty():
+		return
+	sim.cash = float(_state.cash)
+	sim.earn_level = int(_state.earn_level)
+	sim.press_level = int(_state.press_level)
+	sim.wrap_level = int(_state.wrap_level)
+	sim.has_scent = bool(_state.has_scent)
 
 
 func _on_gear_input(event: InputEvent) -> void:
@@ -726,7 +1054,14 @@ func _process(delta: float) -> void:
 
 
 func _tick(dt: float) -> void:
-	sim.advance(dt)
+	## HOME and REWARD do not advance the simulation, but they DO still draw:
+	## the world is live behind both of them, which is most of why the reference
+	## reads as one continuous place rather than as a game with menus over it.
+	if _phase == Phase.RUN:
+		sim.advance(dt)
+	elif _phase == Phase.RULER:
+		_ruler_t = minf(_ruler_t + dt, 1.0)
+		_ruler.queue_redraw()
 	_stand = clampf(_stand + (dt * 2.2 if sim.standing else -dt * 3.0), 0.0, 1.0)
 	if _toast_t > 0.0:
 		_toast_t -= dt
@@ -742,18 +1077,52 @@ func _tick(dt: float) -> void:
 ## returned early from then on, and it sat frozen with a live HUD - which to the
 ## person holding the phone is a crash. Every test in that suite played a level
 ## and read the state at the end, which is the exact instant the freeze began.
-func _on_level_finished(_value: float) -> void:
-	_interlude = INTERLUDE_SECONDS
+func _on_level_finished(value: float) -> void:
+	_run_value = value
+	_run_best = float(_state.best)
+	_beat_best = value > _run_best
+	_ruler_t = 0.0
+	_set_phase(Phase.RULER)
 
 
+## The ruler runs itself and then hands over; the reward screen waits for a tap.
+##
+## The climb is what makes the number mean something - the reference animates the
+## batch up an absolute money scale past a yellow band at your own best - so it
+## is on a timer rather than on a button. Being made to tap through an animation
+## you have not finished watching is worse than either.
 func _advance_interlude(dt: float) -> void:
-	if _interlude <= 0.0:
+	if _phase != Phase.RULER:
 		return
-	_interlude -= dt
-	if _interlude > 0.0:
+	_interlude += dt
+	if _interlude < RULER_SECONDS:
 		return
+	_interlude = 0.0
+	_set_phase(Phase.REWARD)
+
+
+## Taking the money is the only thing that banks it, and the only thing that
+## moves the level on.
+func _take_reward() -> void:
+	if _phase != Phase.REWARD:
+		return
+	sim.cash += _run_value
+	_state.cash = sim.cash
+	_state.best = maxf(float(_state.best), _run_value)
+	_state.level = sim.level + 1
+	Save.store(_state)
 	sim.restart(sim.level + 1)
+	_apply_save_to_sim()
 	_stand = 0.0
+	_set_phase(Phase.HOME)
+	_sync()
+
+
+## The first swipe starts the run, which is the only tutorial the reference has.
+func _start_run() -> void:
+	if _phase != Phase.HOME:
+		return
+	_set_phase(Phase.RUN)
 
 
 func _on_stood_up(_z: float) -> void:
@@ -785,6 +1154,11 @@ func freeze(start_level: int = 1) -> void:
 	_ensure_booted()
 	frozen = true
 	sim.restart(start_level)
+	_apply_save_to_sim()
+	## A harness plays; it does not sit on the home screen waiting for a swipe.
+	## Same simulation either way - HOME differs only in not calling advance -
+	## so this is a starting phase, not a test-only code path.
+	_set_phase(Phase.RUN)
 	_interlude = 0.0
 	_stand = 0.0
 	_sync()
@@ -1230,6 +1604,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton:
 		_dragging = event.pressed
 	elif event is InputEventScreenDrag or (event is InputEventMouseMotion and _dragging):
+		## THE FIRST SWIPE STARTS THE RUN, and it also steers - the reference
+		## has no start button, and the swipe that begins a run is the same
+		## gesture that moves the batch. Reaching here at all means no control
+		## consumed it, which is what keeps a tap on a boost card from starting
+		## the run - the bug that shipped twice on the last game.
+		if _phase == Phase.HOME:
+			_start_run()
+		if _phase != Phase.RUN:
+			return
 		var dx: float = event.relative.x
 		var span := float(get_viewport().get_visible_rect().size.x)
 		sim.steer_to(sim.target_x + dx / span * Tuning.LANE_HALF_WIDTH * 3.4)

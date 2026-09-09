@@ -65,6 +65,59 @@ it produced an **identical** per-candle value across four scripted play styles.
 
 `weaving the pools beats only collecting` is the standing guard on it.
 
+## A RUN IS FOUR PHASES, and `_set_phase` is the only thing that changes them
+
+`HOME -> RUN -> RULER -> REWARD -> HOME`, and every screen in the game is one of them.
+
+**HOME is not a menu.** The reference has nothing that stops the world: between runs the
+player sits on the runway with the level already built behind the cards, and the first swipe
+starts it. So HOME is the game with `sim.advance` not being called - `_sync()` still runs, and
+what you are looking at is the level you are about to play.
+
+**`_set_phase()` is the only writer.** Assigning `_phase` and calling `_show_screens()` next to
+it worked in four places out of five; `freeze()` set the phase to RUN and left the home screen
+drawn over the entire game. `_show_screens()` recomputes every screen's visibility from the
+phase, so a screen cannot be left up by a transition nobody thought about.
+
+**`freeze()` starts in RUN**, because a harness plays rather than sitting on the home screen
+waiting for a swipe. It is the same simulation either way - HOME differs only in not calling
+`advance` - so this is a starting phase, not a test-only path.
+
+## Anything that restarts a level owes it the save
+
+`Sim.restart()` zeroes `cash`: as far as the simulation is concerned that is per-run state.
+Progress lives in `save.gd` and is pushed back in by `_apply_save_to_sim()`. Buying a boost
+restarts the level so the extra candle is actually in the batch - and without the reapply it
+spent 500 and then wiped every other coin the player had on the way out.
+
+## Preferences are not progress
+
+`save.gd` owns `user://candlegift.v1.json`. A settings file, when it arrives, gets its own.
+A pause screen offers to erase your progress next to switches that control sound, and that
+promise only holds if the two are separate things.
+
+`Save.wipe()` sets a **one-way latch** that makes `store()` a no-op for the rest of the
+process. The game saves when it loses focus, and "clear my progress" is followed immediately by
+exactly that, so without the latch the erased state is written straight back and the button
+appears to do nothing.
+
+## Three Godot traps this build hit, none of which fails loudly
+
+**`Viewport.push_input(event)` does nothing for the GUI unless you pass
+`in_local_coords = true`.** Without it the position is transformed by the viewport's own canvas
+transform and the click lands nowhere - and a click that hits nothing is not an error, so a
+test that drives a button goes green having proved nothing. Measured on a bare `Button` under
+the root: zero presses without it, one with.
+
+**Control layout only resolves during a frame.** A harness that does everything in
+`_initialize()` never runs one, so every `Control` keeps a zero-size rect at the origin.
+`run_smoke.gd` waits three frames before it asserts anything, and asserts the rects are
+non-zero first - otherwise every input-driven check below it is a click into empty space.
+
+**A new `class_name` is invisible until the project is re-imported**, and the failure mode is a
+*hang with no output*, not a parse error you can read. `godot --headless --import` after adding
+one. CI does this already as its first step.
+
 ## Four checks, and each answers a different kind of question
 
 ```bash

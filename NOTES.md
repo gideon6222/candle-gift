@@ -110,6 +110,37 @@ the gantry popping out as you cross it. A gantry a metre behind the batch is ele
 the camera and harmless; the rule is about distance from the LENS. Stating a guard in terms of
 the thing it is really about is what stops it failing on correct changes.
 
+### The screens, and saving, 2026-09-09
+
+`HOME -> RUN -> RULER -> REWARD -> HOME`. The home screen is on the runway with the level
+already built behind it; the ruler is absolute money with your own best marked in yellow, which
+the batch climbs on a timer; the reward card is the plain amount and a TAKE button.
+
+**No multiplier fan.** The reference's is a rewarded-video wheel and this game has no ads - a
+spinner that always lands on x1 is a worse screen than no spinner. Gideon asked for the plain
+amount and a continue button, and that is what it is.
+
+The whole flow is driven end to end by `run_smoke.gd` through real pointer events: play a level
+out, assert the ruler is up and the simulation is NOT running under it, wait for the handover,
+press TAKE, assert the money is banked and the next level started, assert the home screen does
+not advance the world, then swipe and assert it does.
+
+Two bugs found by writing that, both of which would have shipped:
+
+- **Buying a boost wiped the player's money.** The boost restarts the level so the extra candle
+  is really in the batch, and `Sim.restart()` zeroes cash.
+- **`freeze()` left the home screen drawn over the game.** It set the phase to RUN without
+  refreshing the screens. Found by `run_visual.gd`, not by any model assertion - every number
+  was right and the picture was not - and fixed structurally by making `_set_phase()` the only
+  writer.
+
+### Still to build
+
+The SHOP button says "COMING SOON". The shop sells SHOPS - Online, Scent, Boutique, Luxury -
+and `sim` already carries `earn_level`, `press_level`, `wrap_level` and `has_scent` for them to
+buy, so the model is ready and only the screen is missing. After that: sound, and a gear that
+opens something other than a level restart.
+
 ### Still wrong, in the order the sheet shows them
 
 1. **Obstacles are placeholders.** The roller is a giant gold cylinder that reads as a
