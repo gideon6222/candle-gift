@@ -59,6 +59,9 @@ var _reward: Control
 var _reward_amount: Label
 var _reward_best: Label
 var _reward_take: Button
+var _shop: Control
+var _shop_rows: VBoxContainer
+var _shop_scroll: ScrollContainer
 var _boost_candle: Button
 var _boost_cash: Button
 ## Fredoka, the reference's face: a rounded geometric sans. Loaded once and
@@ -88,7 +91,7 @@ var _booted := false
 ## swipe starts it. So HOME is not "before the game", it is the game with the
 ## simulation not yet advancing - `_sync()` still runs, so what you are looking
 ## at is the level you are about to play.
-enum Phase { HOME, RUN, RULER, REWARD }
+enum Phase { HOME, RUN, RULER, REWARD, SHOP }
 
 var _phase: int = Phase.HOME
 var _run_value := 0.0
@@ -663,6 +666,7 @@ func _build_hud() -> void:
 	_build_home()
 	_build_ruler()
 	_build_reward()
+	_build_shop()
 	_show_screens()
 
 
@@ -770,6 +774,203 @@ func _build_home() -> void:
 	_home.add_child(hint)
 
 
+## THE SHOP SELLS SHOPS.
+##
+## The reference has no upgrade sheet - no list of stats with buy buttons
+## anywhere in six levels of footage. What the player buys is a new SHOP, and a
+## shop is a new station on the runway or a better product coming off it. The
+## ladder lives in `shops.gd`; this only draws it.
+func _build_shop() -> void:
+	_shop = Control.new()
+	_shop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_shop.mouse_filter = Control.MOUSE_FILTER_STOP
+	_shop.visible = false
+	_shop.draw.connect(_draw_shop_bg)
+	_ui.add_child(_shop)
+
+	var title := Label.new()
+	title.text = "SHOP"
+	title.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	title.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	title.position = Vector2(0, 90)
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_style(title, 96)
+	_shop.add_child(title)
+
+	## A SCROLL CONTAINER, and it has to be able to take a drag.
+	##
+	## The last game shipped a workshop that would not scroll, because the
+	## world's own drag handler answered first and steered instead. Here the
+	## steering lives in `_unhandled_input`, so a drag this container consumes
+	## never reaches it - but only if the container is actually reachable, which
+	## is what `the shop scrolls` asserts.
+	_shop_scroll = ScrollContainer.new()
+	_shop_scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_shop_scroll.offset_top = 230
+	_shop_scroll.offset_bottom = -220
+	_shop_scroll.offset_left = 50
+	_shop_scroll.offset_right = -50
+	_shop_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_shop_scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	## A GODOT SCROLLCONTAINER DOES NOT SCROLL FROM A FINGER.
+	##
+	## Measured, because it is not written anywhere obvious: a mouse WHEEL
+	## scrolls it, an `InputEventPanGesture` scrolls it, and an
+	## `InputEventScreenDrag` - which is what a thumb on a phone produces -
+	## moves it by exactly zero. `emulate_mouse_from_touch` does not save it
+	## either, because a mouse DRAG is not a wheel.
+	##
+	## So a shop list on a phone would simply not move, and nothing about it
+	## would look broken in the editor. The last game shipped a workshop that
+	## would not scroll for a different reason; this is the same bug wearing a
+	## different hat.
+	_shop_scroll.gui_input.connect(_on_shop_drag)
+	_shop.add_child(_shop_scroll)
+
+	_shop_rows = VBoxContainer.new()
+	_shop_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_shop_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_shop_rows.add_theme_constant_override("separation", 26)
+	_shop_scroll.add_child(_shop_rows)
+
+	var back := _button("BACK", 52)
+	back.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	back.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	back.position = Vector2(-190, -170)
+	back.custom_minimum_size = Vector2(380, 120)
+	back.pressed.connect(_close_shop)
+	_shop.add_child(back)
+
+	_build_shop_rows()
+
+
+## One row per shop, built once. Rebuilding the list on every purchase would
+## throw away the scroll position, which on a seven-rung ladder means the row
+## you just bought jumps off the screen at the moment you tap it.
+func _build_shop_rows() -> void:
+	for entry in Shops.ALL:
+		var row := PanelContainer.new()
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		## IGNORE, so a drag that starts on a row reaches the scroll container.
+		## A Control defaults to STOP, containers included, so every row would
+		## otherwise swallow the gesture and the list would move only when the
+		## finger happened to land in a gap between two of them.
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(1, 1, 1, 0.94)
+		sb.border_color = INK
+		sb.set_border_width_all(5)
+		sb.set_corner_radius_all(26)
+		sb.content_margin_left = 26.0
+		sb.content_margin_right = 26.0
+		sb.content_margin_top = 20.0
+		sb.content_margin_bottom = 22.0
+		row.add_theme_stylebox_override("panel", sb)
+		_shop_rows.add_child(row)
+
+		var line := HBoxContainer.new()
+		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		line.add_theme_constant_override("separation", 20)
+		row.add_child(line)
+
+		var text := VBoxContainer.new()
+		text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		line.add_child(text)
+
+		var name_label := Label.new()
+		name_label.text = String(entry.name)
+		_style(name_label, 46)
+		name_label.add_theme_color_override("font_color", INK)
+		name_label.add_theme_constant_override("outline_size", 0)
+		text.add_child(name_label)
+
+		var blurb := Label.new()
+		blurb.text = String(entry.blurb)
+		blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		blurb.custom_minimum_size = Vector2(520, 0)
+		_style(blurb, 30)
+		blurb.add_theme_color_override("font_color", Color(0.36, 0.34, 0.44))
+		blurb.add_theme_constant_override("outline_size", 0)
+		text.add_child(blurb)
+
+		var buy := _button("%s $" % SimUtil.fmt(float(entry.price)), 38)
+		buy.custom_minimum_size = Vector2(250, 110)
+		buy.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		buy.pressed.connect(_on_buy.bind(String(entry.id)))
+		line.add_child(buy)
+
+		row.set_meta("buy", buy)
+		row.set_meta("id", String(entry.id))
+
+
+## Recomputed from the save on every open and after every purchase, so a row can
+## never claim to be for sale when it is not.
+func _refresh_shop() -> void:
+	var owned: Array = _state.get("owned", [])
+	for row in _shop_rows.get_children():
+		var id := String(row.get_meta("id"))
+		var buy: Button = row.get_meta("buy")
+		var entry := Shops.by_id(id)
+		if Shops.owns(owned, id):
+			buy.text = "OWNED"
+			buy.disabled = true
+		elif Shops.can_buy(owned, sim.cash, id):
+			buy.text = "%s $" % SimUtil.fmt(float(entry.price))
+			buy.disabled = false
+		else:
+			## Locked and unaffordable look different on purpose: one is a
+			## price you are saving for, the other is a rung you have not
+			## reached, and a player who cannot tell them apart will save for
+			## the wrong thing.
+			var next := Shops.next_for(owned)
+			var is_next := not next.is_empty() and String(next.id) == id
+			buy.text = "%s $" % SimUtil.fmt(float(entry.price)) if is_next else "LOCKED"
+			buy.disabled = true
+
+
+## Drag anywhere on the list to scroll it. Only the buy buttons take a touch,
+## so a drag that starts on a row reaches this.
+func _on_shop_drag(event: InputEvent) -> void:
+	var dy := 0.0
+	if event is InputEventScreenDrag:
+		dy = event.relative.y
+	elif event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		dy = event.relative.y
+	else:
+		return
+	_shop_scroll.scroll_vertical -= int(dy)
+	_shop_scroll.accept_event()
+
+
+func _on_buy(id: String) -> void:
+	var owned: Array = _state.get("owned", [])
+	if not Shops.can_buy(owned, sim.cash, id):
+		return
+	var entry := Shops.by_id(id)
+	sim.cash -= float(entry.price)
+	owned.append(id)
+	_state.owned = owned
+	_state.cash = sim.cash
+	## The stats are DERIVED from what is owned, so this is the one write and
+	## `_apply_save_to_sim` is the one read.
+	var stats := Shops.stats_for(owned)
+	for k in stats:
+		_state[k] = stats[k]
+	Save.store(_state)
+	_apply_save_to_sim()
+	_refresh_shop()
+	_sync()
+
+
+func _close_shop() -> void:
+	_set_phase(Phase.HOME)
+
+
+func _draw_shop_bg() -> void:
+	_shop.draw_rect(Rect2(Vector2.ZERO, _shop.size), Color(0.129, 0.098, 0.271, 0.93))
+
+
 ## The money ruler: an absolute scale with your own best marked on it, which the
 ## finished batch climbs. Not a fraction of a target, and no stars.
 func _build_ruler() -> void:
@@ -844,6 +1045,9 @@ func _show_screens() -> void:
 	_home.visible = _phase == Phase.HOME
 	_ruler.visible = _phase == Phase.RULER
 	_reward.visible = _phase == Phase.REWARD
+	_shop.visible = _phase == Phase.SHOP
+	if _phase == Phase.SHOP:
+		_refresh_shop()
 	if _phase == Phase.REWARD:
 		_reward_amount.text = "%s $" % SimUtil.fmt(_run_value)
 		_reward_best.visible = _beat_best
@@ -896,7 +1100,7 @@ func _on_boost_cash() -> void:
 
 
 func _on_shop() -> void:
-	_say("SHOP COMING SOON")
+	_set_phase(Phase.SHOP)
 
 
 func _card(title: String, caption: String, tint: Color, at: Vector2) -> Button:
@@ -1029,10 +1233,16 @@ func _apply_save_to_sim() -> void:
 	if _state.is_empty():
 		return
 	sim.cash = float(_state.cash)
-	sim.earn_level = int(_state.earn_level)
-	sim.press_level = int(_state.press_level)
-	sim.wrap_level = int(_state.wrap_level)
-	sim.has_scent = bool(_state.has_scent)
+	## DERIVED FROM WHAT IS OWNED, not read out of the save's own copies.
+	## Those are still written so a downgrade does not lose everything, but
+	## `Shops` is the source of truth - a stat stored beside the list of
+	## shops is a second one, and the two drift the first time a rung is
+	## inserted in the middle of the ladder.
+	var stats := Shops.stats_for(_state.get("owned", []))
+	sim.earn_level = int(stats.earn_level)
+	sim.press_level = int(stats.press_level)
+	sim.wrap_level = int(stats.wrap_level)
+	sim.has_scent = bool(stats.has_scent)
 
 
 func _on_gear_input(event: InputEvent) -> void:

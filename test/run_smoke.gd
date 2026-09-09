@@ -17,6 +17,7 @@ extends SceneTree
 var _t := TestHarness.new()
 var _main
 var _frames := 0
+var _started := false
 
 
 ## THE CHECKS RUN AFTER REAL FRAMES, not inside `_initialize`.
@@ -52,8 +53,25 @@ func _process(_delta: float) -> bool:
 	_frames += 1
 	if _frames < 3:
 		return false
-	_run(_main)
-	return true
+	if not _started:
+		_started = true
+		## `_run` is a COROUTINE and quits the tree itself when it is done.
+		##
+		## It has to be, because showing a screen is not the same as laying it
+		## out: a hidden Control is not laid out at all, so the frame after it
+		## becomes visible is the first one where its children have real rects.
+		## Without a frame in between, a test that presses a button inside a
+		## freshly-opened panel presses empty space - and hitting nothing is not
+		## an error, so it passes for the wrong reason.
+		_run(_main)
+	return false
+
+
+## Let the layout catch up. Two frames, because a container that resizes its
+## children can take one frame to size itself and another to place them.
+func _settle() -> void:
+	await process_frame
+	await process_frame
 
 
 func _run(main) -> void:
@@ -86,6 +104,7 @@ func _run(main) -> void:
 	_check_no_gantry_is_left_behind(main)
 	_check_a_tap_on_a_card_does_not_start_the_run(main)
 	_check_progress_is_saved(main)
+	await _check_the_shop_sells_shops(main)
 
 	_finish()
 
@@ -421,21 +440,114 @@ func _check_progress_is_saved(main) -> void:
 	main._state.cash = 777.0
 	main._state.level = 4
 	main._state.best = 12345.0
-	main._state.press_level = 2
+	main._state.owned = [Shops.ONLINE, Shops.BOUTIQUE]
 	Save.store(main._state)
 
 	var reloaded := Save.load_state()
 	_t.approx(float(reloaded.cash), 777.0, 0.01, "cash did not survive")
 	_t.eq(int(reloaded.level), 4, "level did not survive")
-	_t.eq(int(reloaded.press_level), 2, "an upgrade did not survive")
+	_t.eq(reloaded.owned.size(), 2, "the shops owned did not survive")
 
 	## `sim.restart` knows nothing about the save, so anything that restarts a
 	## level has to reapply it. A level restarted without that silently drops
-	## every upgrade the player owns, which looks like the shop not working.
+	## every shop the player owns, which looks like the shop not working.
 	main._state = reloaded
 	main.sim.restart(4)
 	main._apply_save_to_sim()
-	_t.eq(main.sim.press_level, 2, "restarting a level dropped a bought upgrade")
+	_t.eq(main.sim.press_level, 1, "restarting a level dropped a bought shop")
+	_t.eq(main.sim.earn_level, 1, "restarting a level dropped a bought shop")
+
+
+## THE SHOP SELLS SHOPS, and the ladder is the point of it.
+##
+## Driven through the real buttons, because the model is already covered by
+## `test_shops.gd` - what this adds is that the screen is reachable, that its
+## rows are wired to the right ids, and that a disabled row cannot be bought by
+## tapping it anyway.
+func _check_the_shop_sells_shops(main) -> void:
+	_t.begin("smoke > the shop sells shops")
+	Save._reset_latch_for_tests()
+	main.freeze()
+	main._state.owned = []
+	main._state.cash = 1500.0
+	main.sim.cash = 1500.0
+	main._set_phase(main.Phase.SHOP)
+	await _settle()
+
+	_t.ok(main._shop.visible, "the shop is the phase but is not visible")
+	_t.eq(main._shop_rows.get_child_count(), Shops.ALL.size(),
+		"the shop does not have a row for every shop in the ladder")
+
+	var rows: Array = main._shop_rows.get_children()
+	var first: Button = rows[0].get_meta("buy")
+	var third: Button = rows[2].get_meta("buy")
+	_t.eq(first.disabled, false, "the first rung is not buyable with the money for it")
+	_t.eq(third.disabled, true, "a rung further up the ladder was buyable")
+
+	## TAPPING A DISABLED ROW MUST DO NOTHING. A disabled Button swallows the
+	## press in Godot, but "the engine does it for us" is exactly the assumption
+	## that stops being true the day someone styles the row as a Panel with a
+	## click handler instead.
+	var cash_before: float = main.sim.cash
+	_press(third)
+	_t.approx(main.sim.cash, cash_before, 0.01, "tapping a locked shop charged for it")
+	_t.eq(main._state.owned.size(), 0, "tapping a locked shop bought it")
+
+	_press(first)
+	_t.eq(Shops.owns(main._state.owned, Shops.ONLINE), true,
+		"buying the first shop did not record it")
+	_t.approx(main.sim.cash, 500.0, 0.01, "buying a shop did not charge the right price")
+	_t.eq(main.sim.earn_level, 1, "buying the online shop did not reach the simulation")
+	_t.eq(first.disabled, true, "a shop just bought is still for sale")
+	_t.eq(first.text, "OWNED", "a shop just bought does not say so")
+
+	## And it is on disk, not just in memory.
+	var reloaded := Save.load_state()
+	_t.eq(Shops.owns(reloaded.owned, Shops.ONLINE), true, "the purchase was not saved")
+
+	## The next rung opens up once there is money for it.
+	main.sim.cash = 9000.0
+	main._state.cash = 9000.0
+	main._refresh_shop()
+	var second: Button = rows[1].get_meta("buy")
+	_t.eq(second.disabled, false, "the next rung did not open once it was affordable")
+
+	_t.begin("smoke > the shop scrolls")
+	## THE LAST GAME SHIPPED A WORKSHOP THAT WOULD NOT SCROLL, because the
+	## world's drag handler answered the gesture and steered instead. Steering
+	## lives in `_unhandled_input` here, so anything this container consumes
+	## never reaches it - but that only helps if the container is reachable.
+	_t.eq(main._shop_scroll.mouse_filter, Control.MOUSE_FILTER_STOP,
+		"the shop's scroll container does not take input, so it cannot scroll")
+
+	## THE VIEW IS SHRUNK FOR THIS CHECK, deliberately.
+	##
+	## Seven rows fit on a phone, so at its real size there is nothing to
+	## scroll and the check would pass without exercising anything. Asserting a
+	## behaviour that the current content cannot reach is a green light that
+	## goes out the day an eighth shop is added - which is precisely when it
+	## would matter. So the view is made too small on purpose and the gesture
+	## is tested for real.
+	main._shop_scroll.anchor_bottom = 0.0
+	main._shop_scroll.offset_bottom = 630.0
+	await _settle()
+	_t.gt(main._shop_rows.size.y, main._shop_scroll.size.y,
+		"the view was shrunk and the rows still fit, so this proves nothing")
+
+	var before: int = main._shop_scroll.scroll_vertical
+	_drag_touch(main._shop_scroll, Vector2(0, -320))
+	await _settle()
+	_t.gt(float(main._shop_scroll.scroll_vertical), float(before),
+		"dragging the shop did not scroll it")
+	_t.eq(main._phase, main.Phase.SHOP, "dragging inside the shop left the shop")
+
+	main._shop_scroll.anchor_bottom = 1.0
+	main._shop_scroll.offset_bottom = -220.0
+	await _settle()
+
+	var back: Button = main._shop.get_child(main._shop.get_child_count() - 1)
+	_press(back)
+	_t.eq(main._phase, main.Phase.HOME, "leaving the shop did not go back to the home screen")
 
 
 ## Driving a control the way a thumb does, rather than calling its handler.
@@ -457,6 +569,30 @@ func _press(b: Button) -> void:
 		## is NOT an error, so the test goes green having proved nothing. Measured
 		## on a bare Button under the root: zero presses without it, one with.
 		b.get_viewport().push_input(e, true)
+
+
+## A FINGER DRAG, not a mouse wheel.
+##
+## The wheel would scroll a ScrollContainer and prove nothing about a phone. The
+## gesture that failed on the last game was a drag, and a drag is what has to be
+## answered by the container rather than by the world behind it.
+func _drag_touch(c: Control, delta: Vector2) -> void:
+	var vp := c.get_viewport()
+	var at: Vector2 = c.get_global_rect().get_center()
+	var down := InputEventScreenTouch.new()
+	down.pressed = true
+	down.position = at
+	vp.push_input(down, true)
+	for i in 8:
+		var step := delta / 8.0
+		var mv := InputEventScreenDrag.new()
+		mv.position = at + step * float(i + 1)
+		mv.relative = step
+		vp.push_input(mv, true)
+	var up := InputEventScreenTouch.new()
+	up.pressed = false
+	up.position = at + delta
+	vp.push_input(up, true)
 
 
 func _swipe(main, dx: float) -> void:

@@ -89,3 +89,33 @@ func test_a_wipe_cannot_be_undone_by_a_later_save(t: TestHarness) -> void:
 	var s := Save.load_state()
 	t.eq(s.level, 1, "a save after a wipe put the progress back")
 	t.eq(s.cash, 0.0, "a save after a wipe put the money back")
+
+
+## The owned list is the one field that is not a number, and it is the one a
+## hand-edited or future-version file can put anything into.
+func test_the_owned_list_is_rebuilt_rather_than_trusted(t: TestHarness) -> void:
+	Save._reset_latch_for_tests()
+	var f := FileAccess.open(Save.PATH, FileAccess.WRITE)
+	f.store_string('{"owned": ["online", 7, null, "online", "boutique"]}')
+	f = null
+	var s := Save.load_state()
+	t.eq(s.owned, ["online", "boutique"],
+		"the owned list kept a non-string id or a duplicate")
+
+
+func test_owned_survives_a_round_trip(t: TestHarness) -> void:
+	Save._reset_latch_for_tests()
+	Save.store({"owned": [Shops.ONLINE, Shops.BOUTIQUE]})
+	var s := Save.load_state()
+	t.eq(s.owned.size(), 2, "the owned list did not survive a round trip")
+	t.eq(Shops.owns(s.owned, Shops.BOUTIQUE), true, "a bought shop was lost")
+
+
+## A save with a garbage owned list must not be able to grant anything.
+func test_a_save_that_is_not_an_array_falls_back_to_owning_nothing(t: TestHarness) -> void:
+	Save._reset_latch_for_tests()
+	var f := FileAccess.open(Save.PATH, FileAccess.WRITE)
+	f.store_string('{"owned": "everything"}')
+	f = null
+	var s := Save.load_state()
+	t.eq(s.owned, [], "a non-array owned field was not rejected")

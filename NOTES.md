@@ -134,6 +134,43 @@ Two bugs found by writing that, both of which would have shipped:
   was right and the picture was not - and fixed structurally by making `_set_phase()` the only
   writer.
 
+### The shop, 2026-09-09
+
+**The shop sells SHOPS**, which is the reference's whole meta-game: there is no upgrade sheet
+anywhere in six levels of footage. `shops.gd` is a seven-rung ladder. The first four names and
+the two prices marked in the file are the reference's; the last three - DEPARTMENT STORE,
+ATELIER, FLAGSHIP STORE - are ours, because the footage stops at level six and stopping there
+would leave the third mould and the third wrap unreachable. `test_every_shop_grants_something_reachable`
+asserts the top of the ladder reaches the top of the content.
+
+**Stats are derived from what is owned, never stored beside it.** `Shops.stats_for(owned)` is
+the only read. A field kept next to the list of shops is a second source of truth, and the two
+drift the first time a rung is inserted into the middle of the ladder - which is exactly when
+nobody is looking.
+
+**A shop can only be bought if it is the next rung.** Without that, one lucky run buys the
+FLAGSHIP STORE and skips everything under it: the player owns the best wrap in the game while
+the press is still stamping PLAIN.
+
+### A Godot ScrollContainer does not scroll from a finger
+
+Measured, because it is not written anywhere obvious. Pushing each kind of event at a
+`ScrollContainer` with content taller than its view:
+
+| Event | `scroll_vertical` |
+|---|---|
+| mouse wheel | 50 |
+| `InputEventPanGesture` | 400 |
+| `InputEventScreenDrag` | **0** |
+
+`emulate_mouse_from_touch` does not save it either, because a mouse *drag* is not a wheel. So
+the shop list would simply not have moved on the phone, and nothing about it looks wrong in the
+editor or in a screenshot. `_on_shop_drag` translates the drag into `scroll_vertical` by hand.
+
+The rows also have to be `MOUSE_FILTER_IGNORE`. A `Control` defaults to STOP, containers
+included, so every row would swallow the gesture and the list would move only when the finger
+happened to land in a gap between two of them.
+
 ### Still to build
 
 The SHOP button says "COMING SOON". The shop sells SHOPS - Online, Scent, Boutique, Luxury -

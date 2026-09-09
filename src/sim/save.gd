@@ -25,6 +25,11 @@ const DEFAULTS := {
 	"press_level": 0,
 	"wrap_level": 0,
 	"has_scent": false,
+	## THE SHOPS OWNED, as ids. The stats above are DERIVED from this by
+	## `Shops.stats_for` - they are still in the file because a save written
+	## before the shop existed has them, and dropping them would silently
+	## demote anyone upgrading. `Shops` wins wherever the two disagree.
+	"owned": [],
 }
 
 ## A ONE-WAY LATCH. Erasing the save and then quitting used to put it straight
@@ -71,6 +76,17 @@ static func load_state() -> Dictionary:
 					out[k] = int(got)
 			TYPE_BOOL:
 				out[k] = got == true
+			TYPE_ARRAY:
+				## Rebuilt element by element rather than trusted. A hand-edited
+				## or future-version save can put anything in here, and an id that
+				## is not a string would reach `Array.has()` and quietly never
+				## match - so the player would own a shop that grants nothing.
+				if got is Array:
+					var ids: Array = []
+					for v in got:
+						if v is String and not ids.has(v):
+							ids.append(v)
+					out[k] = ids
 			_:
 				out[k] = got
 	out.level = maxi(1, int(out.level))

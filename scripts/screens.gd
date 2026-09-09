@@ -33,7 +33,7 @@ func _process(_d: float) -> bool:
 	root.get_texture().get_image().save_png("user://screen_%d.png" % _at)
 	print("  screen %d" % _at)
 	_at += 1
-	if _at > 2:
+	if _at > 3:
 		print("wrote %s" % OS.get_user_data_dir())
 		quit(0)
 		return true
@@ -61,6 +61,12 @@ func _pose(i: int) -> void:
 			_main._ruler_t = 0.72
 			_main._set_phase(_main.Phase.RULER)
 			_main._ruler.queue_redraw()
+		3:   # the shop, with money for the first rung
+			_main.freeze()
+			_main._state.owned = []
+			_main._state.cash = 1500.0
+			_main.sim.cash = 1500.0
+			_main._set_phase(_main.Phase.SHOP)
 		2:   # the reward card
 			_main._run_value = 18400.0
 			_main._beat_best = true
