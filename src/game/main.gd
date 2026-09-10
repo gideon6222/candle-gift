@@ -105,6 +105,34 @@ var _cam_z := 0.0
 ## the first frame only.
 var _frame_d := 0.0
 
+## FLOATING VALUE TEXT, pooled.
+##
+## The reference puts a green `+143$` in the world where the value happened, and
+## this game had one 2D toast in a corner that said `-3`. Money and batch size
+## are the two axes the whole game is about, and neither was visible at the
+## moment it changed.
+##
+## A pool rather than an allocation per event, for the reason `_dress_rig`
+## already learned the expensive way: a whole slab crossing a pool fires one
+## event per candle in the same frame, and a `Label3D` per candle per frame is
+## a new node and a new font texture sixty times a second. Sixteen is measured
+## against the worst real burst - thirty candles cannot each take a note in one
+## frame, because notes are spaced further apart than TRAIL_GAP.
+const FLOATERS := 16
+const FLOAT_LIFE := 1.05
+var _floaters: Array[Label3D] = []
+var _float_t: Array[float] = []
+var _float_at: Array[Vector3] = []
+var _float_next := 0
+
+## CAMERA KICK on a hit, in metres, decayed every frame. Nothing in the game
+## registered an obstacle except a number going down and a sound; this is what
+## makes losing candles land as a hit rather than as an accounting change.
+var _shake := 0.0
+## Which frame the kick last fired, so a hit that takes five candles is one kick
+## rather than five stacked into a lurch.
+var _shake_lock := 0.0
+
 ## The last step handed to `_tick`, so the camera's easing is in game time like
 ## everything else. Read only by `_draw_camera`.
 var _last_dt := 1.0 / 60.0
@@ -399,10 +427,77 @@ func _build_world() -> void:
 	_towers.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_tower_tips.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
+	_build_floaters()
+
 	for i in STATION_SLOTS:
 		_rigs.append(_make_rig())
 
 	_build_hud()
+
+
+## The pool of floating value labels. Built once, never grown, never freed.
+func _build_floaters() -> void:
+	for _i in FLOATERS:
+		var l := Label3D.new()
+		l.font_size = 96
+		## Bigger than the station signs relative to its distance: a floater is
+		## read for about a second, in the lower half of the frame, while the
+		## player is steering. A sign can be studied; this cannot.
+		l.pixel_size = 0.010
+		if _font != null:
+			l.font = _font
+		## BILLBOARD_ENABLED, unlike the station signs, which are fixed to their
+		## gantry and face down the track. A floater has no object to belong to
+		## and has to be legible from wherever the lens happens to be.
+		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		## Drawn OVER the batch. A `+5 $` that appears behind thirty candles is
+		## a `+5 $` nobody sees, and the whole point is that it is noticed in
+		## peripheral vision while the player is looking somewhere else.
+		l.no_depth_test = true
+		l.render_priority = 4
+		l.outline_size = 26
+		l.outline_modulate = INK
+		l.visible = false
+		add_child(l)
+		_floaters.append(l)
+		_float_t.append(0.0)
+		_float_at.append(Vector3.ZERO)
+
+
+## Put a number in the world where it was earned or lost.
+##
+## Round-robin rather than "find a free one": with a fixed pool the oldest is
+## always the right one to reuse, and searching for a free slot means a burst
+## bigger than the pool silently drops the LAST events - which are the ones the
+## player is most likely to be looking at.
+func _float(text: String, at: Vector3, tint: Color) -> void:
+	var i := _float_next
+	_float_next = (_float_next + 1) % FLOATERS
+	var l := _floaters[i]
+	l.text = text
+	l.modulate = tint
+	l.visible = true
+	_float_t[i] = FLOAT_LIFE
+	_float_at[i] = at
+
+
+## Rise and fade. Runs in game time like everything else, so a filmed run and a
+## played one agree.
+func _advance_floaters(dt: float) -> void:
+	for i in FLOATERS:
+		if _float_t[i] <= 0.0:
+			continue
+		_float_t[i] -= dt
+		if _float_t[i] <= 0.0:
+			_floaters[i].visible = false
+			continue
+		var age := 1.0 - _float_t[i] / FLOAT_LIFE
+		var l := _floaters[i]
+		l.position = _float_at[i] + Vector3(0.0, 1.1 + age * 2.4, 0.0)
+		## Fades only in the last third. Fading from the first frame makes the
+		## number hardest to read exactly when it appears, which is the one
+		## moment it has to be readable.
+		l.modulate.a = clampf((1.0 - age) * 3.0, 0.0, 1.0)
 
 
 func _rail(side: int) -> MeshInstance3D:
@@ -1754,6 +1849,12 @@ func _tick(dt: float) -> void:
 	if _toast_t > 0.0:
 		_toast_t -= dt
 		_toast.modulate.a = clampf(_toast_t, 0.0, 1.0)
+	_advance_floaters(dt)
+	## Decays fast. A kick that outlasts the moment reads as a camera fault
+	## rather than as an impact - the whole value of it is that it is over
+	## before the player has finished flinching.
+	_shake = maxf(_shake - dt * 1.9, 0.0)
+	_shake_lock = maxf(_shake_lock - dt, 0.0)
 	_advance_interlude(dt)
 	_sync()
 	_trace(dt)
@@ -1852,14 +1953,23 @@ func _on_dipped(_kind: int, _x: float, _z: float, _colour: Color) -> void:
 	_sfx.play_dip(layer)
 
 
-func _on_picked_up(_x: float, _z: float) -> void:
+func _on_picked_up(x: float, z: float) -> void:
 	## Climbs a little with the size of the batch, which is the only feedback
 	## that a run is going well while it is still going.
 	_sfx.play(Sfx.PICKUP, 0.9 + minf(float(sim.count()), 24.0) * 0.02)
+	## GOLD, and a count rather than a value. Growing the batch is one of the
+	## game's two axes and the number that matters for it is how many candles
+	## there now are, not what they are worth - which is decided later, by where
+	## the player steers them.
+	_float("+1", Vector3(x, 0.0, z), GOLD)
 
 
-func _on_cash_taken(_x: float, _z: float) -> void:
+func _on_cash_taken(x: float, z: float) -> void:
 	_sfx.play(Sfx.CASH)
+	## The reference's own feedback: green, in the world, with the amount and
+	## the dollar. `CASH_VALUE` rather than a literal, so a balance change moves
+	## the number the player reads with the number the bank gets.
+	_float("+%d $" % Tuning.CASH_VALUE, Vector3(x, 0.0, z), NOTE)
 
 
 func _on_stood_up(_z: float) -> void:
@@ -1867,10 +1977,24 @@ func _on_stood_up(_z: float) -> void:
 	_say("STAND UP")
 
 
-func _on_hit(_kind: String, _x: float, _z: float, n: int) -> void:
-	if n > 0:
-		_sfx.play(Sfx.KNOCK)
-		_say("-%d" % n)
+func _on_hit(_kind: String, x: float, z: float, n: int) -> void:
+	if n <= 0:
+		return
+	_sfx.play(Sfx.KNOCK)
+	## AT THE OBSTACLE, in the hazard colour, instead of in a corner. Everything
+	## that hurts in this game is the same coral family so that "this hurts" is
+	## one colour the player learns once, and the number that says how much it
+	## hurt belongs in that family too.
+	_float("-%d" % n, Vector3(x, 0.0, z), CORAL)
+	## A KICK, SIZED BY THE LOSS, and locked so one collision is one kick.
+	##
+	## An obstacle can clip several candles in the same frame, and without the
+	## lock each one added its own kick - a five-candle hit became a lurch five
+	## times the size of a one-candle hit, which is a punishment curve nobody
+	## designed. The lock is in game time, so it is the same on a filmed run.
+	if _shake_lock <= 0.0:
+		_shake = minf(0.16 + float(n) * 0.05, 0.34)
+		_shake_lock = 0.12
 
 
 func _say(msg: String) -> void:
@@ -2018,7 +2142,24 @@ func _draw_camera(z: float) -> void:
 	# Transform3D.looking_at, not Node3D.look_at: the node method requires the
 	# node to be in the tree and errors when it is not, which is exactly the
 	# headless case. This is pure maths and works anywhere.
-	_cam.transform = Transform3D(Basis.IDENTITY, eye).looking_at(focus, Vector3.UP)
+	var xf := Transform3D(Basis.IDENTITY, eye).looking_at(focus, Vector3.UP)
+
+	## THE KICK IS APPLIED AFTER THE SOLVE, never inside it.
+	##
+	## Fed in before, it would move the lens that the framing bisection is
+	## measuring against, so every hit would nudge the camera and the solve
+	## would pull back to compensate for its own shake - two mechanisms driving
+	## one number, which is the shape that oscillates.
+	##
+	## Along the camera's OWN axes, so it reads as the lens being knocked rather
+	## than as the world sliding, and with no `randf()`: a decaying wobble off
+	## the simulation's clock is deterministic, which the golden and the contact
+	## sheet both require.
+	if _shake > 0.0:
+		var p := sim.time * 47.0
+		xf.origin += xf.basis.x * (sin(p) * _shake) + xf.basis.y * (sin(p * 1.7) * _shake * 0.7)
+
+	_cam.transform = xf
 	_cam_z = eye.z
 
 

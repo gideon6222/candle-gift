@@ -105,6 +105,7 @@ func _run(main) -> void:
 	_check_the_world_casts_shadows(main)
 	_check_the_far_end_fades_into_the_sky(main)
 	_check_the_whole_batch_stays_on_screen(main)
+	_check_value_appears_where_it_is_earned(main)
 	_check_a_tap_on_a_card_does_not_start_the_run(main)
 	_check_progress_is_saved(main)
 	await _check_the_shop_sells_shops(main)
@@ -427,6 +428,68 @@ func _check_the_whole_batch_stays_on_screen(main) -> void:
 	_t.gt(float(main.sim.count()), 6.0,
 		"the batch only reached %d candles, so this never tested a long one"
 			% main.sim.count())
+	main.freeze(1)
+
+
+## VALUE APPEARS IN THE WORLD, WHERE IT HAPPENED.
+##
+## The reference floats a green `+143$` at the place value was added; this game
+## had a single 2D toast in a corner reading `-3`. Money and batch size are the
+## two axes the whole game is about and neither was visible at the moment it
+## changed.
+##
+## Driven through the SIGNAL HANDLERS rather than by calling `_float` - the
+## thing that breaks is a handler that stops calling it, and a test that calls
+## `_float` itself would pass with every handler gutted. Verified by emptying
+## `_on_cash_taken`, which fails this.
+func _check_value_appears_where_it_is_earned(main) -> void:
+	_t.begin("smoke > value appears where it is earned")
+	for l in main._floaters:
+		l.visible = false
+	_t.eq(main._floaters.size(), main.FLOATERS, "the floater pool is not the size it says")
+
+	main._on_cash_taken(1.5, 40.0)
+	main._on_picked_up(-1.0, 42.0)
+	main._on_hit("barrier", 0.5, 44.0, 3)
+
+	var shown := 0
+	var texts := []
+	for l in main._floaters:
+		if l.visible:
+			shown += 1
+			texts.append(l.text)
+	_t.eq(shown, 3, "three value events produced %d floaters, not three" % shown)
+	## The amount is READ FROM TUNING, not written twice. A note is worth
+	## CASH_VALUE and the player is told CASH_VALUE; a literal here would keep
+	## agreeing with the bank right up until someone rebalanced money.
+	_t.ok(texts.has("+%d $" % Tuning.CASH_VALUE),
+		"no floater said what a note was worth - got %s" % [texts])
+	_t.ok(texts.has("+1"), "picking up a candle said nothing - got %s" % [texts])
+	_t.ok(texts.has("-3"), "losing three candles said nothing - got %s" % [texts])
+
+	## A HIT KICKS THE CAMERA, and one collision is ONE kick.
+	##
+	## An obstacle can clip several candles in the same frame. Without the lock
+	## each one added its own kick and a five-candle hit lurched five times as
+	## far as a one-candle hit, which is a punishment curve nobody designed.
+	_t.gt(main._shake, 0.0, "a hit did not kick the camera at all")
+	var one_hit: float = main._shake
+	main._on_hit("barrier", 0.5, 44.0, 3)
+	main._on_hit("barrier", 0.5, 44.0, 3)
+	_t.eq(main._shake, one_hit,
+		"two more hits in the same frame stacked the kick to %.3f from %.3f"
+			% [main._shake, one_hit])
+
+	## And it decays away rather than leaving the lens sitting off centre.
+	main.advance(1.0, 1.0 / 60.0)
+	_t.eq(main._shake, 0.0, "the camera kick is still %.3f a second later" % main._shake)
+
+	## The pool is BOUNDED. A burst larger than it must reuse, never grow: a
+	## whole slab crossing a pool fires one event per candle in a single frame.
+	for i in main.FLOATERS * 3:
+		main._on_picked_up(0.0, 50.0 + float(i))
+	_t.eq(main._floaters.size(), main.FLOATERS,
+		"the floater pool grew to %d under a burst" % main._floaters.size())
 	main.freeze(1)
 
 
