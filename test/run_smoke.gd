@@ -106,6 +106,7 @@ func _run(main) -> void:
 	_check_the_far_end_fades_into_the_sky(main)
 	_check_the_whole_batch_stays_on_screen(main)
 	_check_value_appears_where_it_is_earned(main)
+	_check_the_back_button_unwinds_one_layer(main)
 	_check_a_tap_on_a_card_does_not_start_the_run(main)
 	_check_progress_is_saved(main)
 	await _check_the_shop_sells_shops(main)
@@ -569,6 +570,63 @@ func _emitting(pool: Array) -> int:
 		if g.emitting:
 			n += 1
 	return n
+
+
+## THE ANDROID BACK BUTTON UNWINDS ONE LAYER PER PRESS.
+##
+## Asserted as BEHAVIOUR, never as the setting. `quit_on_go_back = false` is a
+## config line that cannot fail, and on its own it is the worse of the two ways
+## to get this wrong: Godot's default throws away a run in progress, and the
+## setting with no handler produces a button that does nothing at all - which
+## reads as a hung app, so the player presses it again harder rather than
+## concluding the game is fine. Neither state shows in a headless suite.
+##
+## `_go_back()` returns whether it quit, so every layer can be driven here
+## without the last press taking the test process down with it.
+func _check_the_back_button_unwinds_one_layer(main) -> void:
+	_t.begin("smoke > the back button unwinds one layer per press")
+
+	## From the shop, back to the home screen.
+	main._set_phase(main.Phase.SHOP)
+	_t.eq(main._go_back(), false, "back quit the app from the shop")
+	_t.eq(main._phase, main.Phase.HOME, "back did not close the shop")
+
+	## During a run, back PAUSES rather than abandoning. Quitting a run lives
+	## behind its own button on the pause panel.
+	main._set_phase(main.Phase.RUN)
+	_t.eq(main._go_back(), false, "back quit the app mid-run")
+	_t.eq(main._phase, main.Phase.PAUSED, "back during a run did not pause it")
+
+	## And the next press RESUMES THE RUN, not the home screen - a level half
+	## played is not somewhere to drop the player.
+	_t.eq(main._go_back(), false, "back quit the app from the pause panel")
+	_t.eq(main._phase, main.Phase.RUN, "back from pause did not resume the run")
+
+	## From the reward screen, back does what TAKE does. A back press must never
+	## be the one way off a screen that would LOSE the run's money.
+	main._run_value = 400.0
+	main._set_phase(main.Phase.REWARD)
+	var bank_before: float = main._bank
+	_t.eq(main._go_back(), false, "back quit the app from the reward screen")
+	_t.eq(main._phase, main.Phase.HOME, "back on the reward screen did not take the reward")
+	_t.gt(main._bank, bank_before,
+		"back on the reward screen left the money behind (%.0f then %.0f)"
+			% [bank_before, main._bank])
+
+	## From the home screen with nothing open, it leaves - and SAVES on the way.
+	## `NOTIFICATION_WM_CLOSE_REQUEST` does not arrive on an Android back-out,
+	## so this is the last chance to write the file.
+	main._set_phase(main.Phase.HOME)
+	main._state.cash = 4242.0
+	_t.eq(main._go_back(), true, "back on the home screen did not quit")
+	_t.eq(float(Save.load_state().cash), 4242.0,
+		"quitting through the back button did not save first")
+	## `_go_back()` returning true is the DECISION to leave; `_notification`
+	## is what calls `quit()`. That split is why this case can be asserted at
+	## all - a test that ran the real quit would end the test process here, and
+	## the one branch that matters most would be the one nobody could check.
+	_t.eq(main._phase, main.Phase.HOME, "deciding to quit changed the phase on the way out")
+	main.freeze(1)
 
 
 ## No station gantry may be drawn CLOSE TO THE LENS.

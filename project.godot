@@ -12,6 +12,18 @@ run/main_scene="res://src/game/main.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
 config/icon="res://icon.svg"
 
+; THE ANDROID BACK BUTTON IS THE GAME'S, and this line is only half of that.
+;
+; The other half is NOTIFICATION_WM_GO_BACK_REQUEST in main.gd's _notification,
+; which unwinds one layer per press: crash report, shop, pause, run, reward,
+; ruler, and only then quits from the home screen. This setting WITHOUT that
+; handler is a button that does nothing at all, which reads as a hung app and is
+; worse than the default - a player presses a dead button again, harder. Never
+; import one without the other.
+;
+; The unwinding is what is asserted, in run_smoke.gd. This line cannot fail.
+config/quit_on_go_back=false
+
 [display]
 
 ; Portrait, because that is the only shape these games are played in.

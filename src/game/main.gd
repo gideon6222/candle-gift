@@ -1951,6 +1951,68 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
 		Save.store(_state)
 		BlackBox.disarm()
+	elif what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		## THE HANDLER DECIDES, THIS ACTS. Keeping `quit()` out of `_go_back()`
+		## is what lets the smoke suite drive every layer including the last one
+		## - a test that exercised the real quit would take the test process
+		## down with it, so the branch that matters most would be the one branch
+		## nobody could assert.
+		if _go_back():
+			get_tree().quit()
+
+
+## THE ANDROID BACK BUTTON, unwinding ONE layer per press.
+##
+## Both halves of this ship together or neither works. Godot's default quits
+## the app, which from the middle of a run throws it away and reads as a crash;
+## `quit_on_go_back = false` on its own produces a button that does NOTHING,
+## which is worse - a player presses a dead button again, harder, rather than
+## concluding the game is fine. Neither state shows in a headless suite unless
+## something asserts the unwinding, so `run_smoke.gd` does.
+##
+## The order is the order the game stacks its screens, and `_set_phase` is
+## still the only thing that changes a phase.
+##
+## Returns whether it quit, which is what makes it testable: a test can drive
+## every layer without the last press taking the process down with it.
+func _go_back() -> bool:
+	## The crash report is the outermost thing there is - it is drawn over a
+	## booted game and its whole job is to be read and dismissed.
+	if _crash != null and is_instance_valid(_crash):
+		_sfx.play(Sfx.BACK)
+		_crash.queue_free()
+		_crash = null
+		return false
+
+	match _phase:
+		Phase.SHOP:
+			_close_shop()
+		Phase.PAUSED:
+			_close_pause()
+		Phase.RUN:
+			## Back during play PAUSES rather than abandoning. The pause panel
+			## is where quitting a run lives, behind its own button.
+			_open_pause()
+		Phase.REWARD:
+			## The same thing the TAKE button does. Back must never be the one
+			## way to leave a screen that LOSES the run's money - so it banks it.
+			_take_reward()
+		Phase.RULER:
+			## A short self-advancing animation. Skipping to its end is a real
+			## action, which is the point: there is no layer here to pop, and a
+			## press that does nothing is the failure this whole handler exists
+			## to avoid.
+			_ruler_t = 1.0
+			_ruler.queue_redraw()
+		_:
+			## HOME, and nothing is open. This is the only press that leaves,
+			## and it saves on the way out - `NOTIFICATION_WM_CLOSE_REQUEST`
+			## does NOT arrive on an Android back-out, so this is the last
+			## chance to write the file.
+			Save.store(_state)
+			BlackBox.disarm()
+			return true
+	return false
 
 
 func _process(delta: float) -> void:
