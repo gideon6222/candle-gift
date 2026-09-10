@@ -24,6 +24,18 @@ config/icon="res://icon.svg"
 ; The unwinding is what is asserted, in run_smoke.gd. This line cannot fail.
 config/quit_on_go_back=false
 
+[autoload]
+
+; Records and replays touch input for filmed runs (scripts/movie.ps1). Inert
+; unless a `record=` or `replay=` user arg is passed, so it costs a played build
+; nothing.
+;
+; Filming is the studio's tool for judging MOTION, and this game has never had
+; it: every judgement of how Candle Gift moves has come from contact sheets
+; driven through the headless seam, which show chosen moments of the simulation
+; and cannot show a real frame reacting to a real touch.
+ReplayPlayer="*res://scripts/replay_player.gd"
+
 [display]
 
 ; Portrait, because that is the only shape these games are played in.
