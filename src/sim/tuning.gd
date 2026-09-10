@@ -66,7 +66,9 @@ const POOL_INSET := 0.15
 ## Small on purpose. Money used to be most of what a run was worth, which made
 ## the batch - the thing the whole game is about building - a rounding error
 ## next to driving over green tags.
-const CASH_VALUE := 45
+## A banknote is worth 5, because the reference's price tags say `5 $`. Money
+## in this game is in the reference's units - see VALUE_SCALE.
+const CASH_VALUE := 5
 const MAGNET_RADIUS := 2.0
 
 ## How plentiful loose candles are, and it RISES WITH THE LEVEL. Thirty candles
@@ -108,10 +110,39 @@ const COLLIDE_TOLERANCE := 0.34
 ## policies in `test/policies.gd` over six levels - see NOTES.md for the table
 ## and re-measure whenever a station, a multiplier, the obstacle mix or the
 ## starting batch changes.
-const PAR := 10000.0
+## MONEY IS IN THE REFERENCE'S UNITS.
+##
+## A level-one run of the weaving bot used to appraise at 18,273 while the
+## reference's own footage rewards about 540 for a comparable run - thirty-four
+## times out. That is not a cosmetic difference: the only two shop prices ever
+## observed are $1,000 and $4,000, and against 18,273 a run they are not prices
+## at all. It also put "148K $" in a money pill that should read "540 $".
+##
+## One constant, applied once in `appraise`, so everything downstream - PAR, the
+## ruler, the pill, the shop ladder - moves together and stays comparable.
+const VALUE_SCALE := 0.03
+
+## `PAR` is the value the star rating is drawn from, and the end-of-run ruler
+## uses your own best rather than a target. MEASURED, not chosen - see NOTES.md
+## for the table, and re-measure whenever a station, a multiplier, the obstacle
+## mix or the value of anything changes.
+const PAR := 450.0
 const STAR_AT := [0.30, 0.60, 1.15]
 
-const LEVEL_SCALE := 1.55      ## what a candle is worth, per level
+## WHAT A CANDLE IS WORTH, PER LEVEL - and it was hyperinflationary at 1.55.
+##
+## A run's value multiplied EIGHTY TIMES over ten levels, which makes any fixed
+## price list meaningless: measured by playing the progression, all seven shops
+## were bought by level nine, and by level fifteen a run paid nine hundred times
+## the first shop's price. A ladder that finishes in nine levels is not a
+## meta-game, it is a tutorial.
+##
+## 1.20 is 6.2x over ten levels and 38x over twenty - still a strong sense of
+## getting richer, and slow enough that a price list can span the game.
+##
+## This does not touch any recorded number: `norm` divides by `scale_for(level)`
+## and the golden is level one, where the scale is 1.0 either way.
+const LEVEL_SCALE := 1.20
 const PRICE_SCALE := 1.70      ## what things cost, per level
 
 

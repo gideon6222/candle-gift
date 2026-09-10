@@ -363,13 +363,13 @@ func _check_the_level_can_be_left(main) -> void:
 	_t.eq(main._phase, main.Phase.REWARD, "the ruler never handed over to the reward screen")
 
 	var level: int = main.sim.level
-	var cash_before: float = main.sim.cash
+	var cash_before: float = main._bank
 	var earned: float = main._run_value
 	_t.gt(earned, 0.0, "the run was worth nothing, so banking it proves nothing")
 
 	_press(main._reward_take)
 	_t.eq(main._phase, main.Phase.HOME, "taking the reward did not return to the home screen")
-	_t.approx(main.sim.cash, cash_before + earned, 0.01,
+	_t.approx(main._bank, cash_before + earned, 0.01,
 		"taking the reward did not bank the money")
 	_t.eq(main.sim.level, level + 1, "taking the reward did not start the next level")
 	_t.eq(main.sim.standing, false, "the next level did not start lying down again")
@@ -401,7 +401,7 @@ func _check_a_tap_on_a_card_does_not_start_the_run(main) -> void:
 	_t.begin("smoke > the boost cards can be tapped without starting the run")
 	main.freeze()
 	main._set_phase(main.Phase.HOME)
-	main.sim.cash = 5000.0
+	main._bank = 5000.0
 	main._state.cash = 5000.0
 	main._refresh_boosts()
 
@@ -415,7 +415,7 @@ func _check_a_tap_on_a_card_does_not_start_the_run(main) -> void:
 	_press(main._boost_candle)
 	_t.eq(main.sim.boost_candles, before + 1, "the CANDLE card did not buy anything")
 	_t.eq(main._phase, main.Phase.HOME, "buying a boost started the run")
-	_t.approx(main.sim.cash, 4500.0, 0.01, "the CANDLE card did not charge for itself")
+	_t.approx(main._bank, 4500.0, 0.01, "the CANDLE card did not charge for itself")
 	_t.eq(main.sim.count(), Tuning.START_CANDLES + 1,
 		"the extra candle was bought but the batch does not have it - the level was "
 		+ "not laid out again")
@@ -425,13 +425,13 @@ func _check_a_tap_on_a_card_does_not_start_the_run(main) -> void:
 	_t.eq(main._phase, main.Phase.HOME, "buying a boost started the run")
 
 	## And a card you cannot afford does nothing at all.
-	main.sim.cash = 0.0
+	main._bank = 0.0
 	main._state.cash = 0.0
 	main.sim.boost_candles = 0
 	main._refresh_boosts()
 	_press(main._boost_candle)
 	_t.eq(main.sim.boost_candles, 0, "a boost was bought with no money")
-	_t.approx(main.sim.cash, 0.0, 0.01, "money went negative buying a boost")
+	_t.approx(main._bank, 0.0, 0.01, "money went negative buying a boost")
 
 
 ## Progress has to survive being put down.
@@ -472,7 +472,7 @@ func _check_the_shop_sells_shops(main) -> void:
 	main.freeze()
 	main._state.owned = []
 	main._state.cash = 1500.0
-	main.sim.cash = 1500.0
+	main._bank = 1500.0
 	main._set_phase(main.Phase.SHOP)
 	await _settle()
 
@@ -490,15 +490,15 @@ func _check_the_shop_sells_shops(main) -> void:
 	## press in Godot, but "the engine does it for us" is exactly the assumption
 	## that stops being true the day someone styles the row as a Panel with a
 	## click handler instead.
-	var cash_before: float = main.sim.cash
+	var cash_before: float = main._bank
 	_press(third)
-	_t.approx(main.sim.cash, cash_before, 0.01, "tapping a locked shop charged for it")
+	_t.approx(main._bank, cash_before, 0.01, "tapping a locked shop charged for it")
 	_t.eq(main._state.owned.size(), 0, "tapping a locked shop bought it")
 
 	_press(first)
 	_t.eq(Shops.owns(main._state.owned, Shops.ONLINE), true,
 		"buying the first shop did not record it")
-	_t.approx(main.sim.cash, 500.0, 0.01, "buying a shop did not charge the right price")
+	_t.approx(main._bank, 500.0, 0.01, "buying a shop did not charge the right price")
 	_t.eq(main.sim.earn_level, 1, "buying the online shop did not reach the simulation")
 	_t.eq(first.disabled, true, "a shop just bought is still for sale")
 	_t.eq(first.text, "OWNED", "a shop just bought does not say so")
@@ -508,7 +508,7 @@ func _check_the_shop_sells_shops(main) -> void:
 	_t.eq(Shops.owns(reloaded.owned, Shops.ONLINE), true, "the purchase was not saved")
 
 	## The next rung opens up once there is money for it.
-	main.sim.cash = 9000.0
+	main._bank = 9000.0
 	main._state.cash = 9000.0
 	main._refresh_shop()
 	var second: Button = rows[1].get_meta("buy")
@@ -619,7 +619,7 @@ func _check_the_pause_panel(main) -> void:
 	_press(main._wipe_button)
 	_t.approx(float(Save.load_state().cash), 0.0, 0.01, "two taps on CLEAR did not erase")
 	_t.eq(Save.load_state().owned.size(), 0, "the shops survived a wipe")
-	_t.eq(main.sim.cash, 0.0, "the wipe did not reach the running game")
+	_t.eq(main._bank, 0.0, "the wipe did not reach the running game")
 	_t.eq(main._phase, main.Phase.HOME, "erasing progress did not return to the home screen")
 
 	## A WIPE CANNOT BE UNDONE BY THE SAVE THAT FOLLOWS IT. The game stores on

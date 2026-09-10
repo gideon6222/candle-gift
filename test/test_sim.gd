@@ -198,3 +198,44 @@ func test_positions_are_what_collides(t: TestHarness) -> void:
 	s.grow(9)
 	s.advance(1.0 / 60.0)
 	t.eq(s.positions().size(), s.count(), "one position per candle, always")
+
+
+## WHAT A RUN IS WORTH MUST NOT DEPEND ON WHAT THE PLAYER ALREADY HAS.
+##
+## `appraise()` adds `cash`, and `cash` is the notes picked up on THIS runway.
+## For a while the bank was seeded into it from the save, so every run appraised
+## the player's whole balance as if they had just earned it - and the reward
+## screen then paid that into the balance again. A bank of 5,000 went 24,528 ->
+## 63,585 -> 141,699 over three runs of the same level.
+##
+## The obvious assertion does NOT catch this. "the bank went up by the amount
+## the reward screen said" is true either way, because both sides inflate
+## together: the screen says R + bank, and the bank goes up by R + bank. The
+## only thing that separates them is playing the same level twice with different
+## amounts of money in the bank and demanding the same answer.
+func test_a_runs_value_does_not_depend_on_the_bank(t: TestHarness) -> void:
+	var poor := Policies.play(Policies.WEAVE, 1)
+
+	var rich := Sim.new(1)
+	rich.cash = 50000.0        ## as if a bank had been seeded into the run
+	var mem := {}
+	var step := 1.0 / 60.0
+	for i in int(round((Tuning.level_seconds(1) + 3.0) / step)):
+		if rich.over:
+			break
+		Policies.steer(Policies.WEAVE, rich, mem)
+		rich.advance(step)
+
+	## The rich run keeps the 50,000 it was handed - `appraise` adds `cash` and
+	## that is correct for notes - so the difference between the two is exactly
+	## the money that was put in, and nothing else.
+	t.approx(rich.appraise() - 50000.0, float(poor.value), 1.0,
+		"a run was worth more because the player already had money")
+
+
+## And restarting clears it, so nothing carries from one runway to the next.
+func test_restart_clears_the_runs_cash(t: TestHarness) -> void:
+	var s := Sim.new(1)
+	s.cash = 1234.0
+	s.restart(1)
+	t.approx(s.cash, 0.0, 0.001, "restarting a level kept the last run's notes")

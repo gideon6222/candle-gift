@@ -208,6 +208,69 @@ boot. Wiping the file was not enough; the scene was still holding the old value.
 depends on ordering fails in isolation or passes in the wrong order, and either way it is not
 testing what it says it is.
 
+### The economy, measured, 2026-09-09
+
+Adding the shop meant asking a question nothing had ever asked: **is the ladder priced
+sensibly?** `run_probe.gd` grew a table for it, and the first answer was that every shop was
+affordable inside five runs - the first rung cost a twentieth of one. Chasing that found two
+real bugs and one structural one.
+
+**THE BANK WAS COUNTED AS RUN EARNINGS AND PAID BACK INTO ITSELF.** `appraise()` adds `cash`,
+and `cash` was being seeded from the save, so a run appraised the player's whole balance as if
+they had just earned it - and the reward screen then banked that. Measured, playing the same
+level three times with 5,000 in the bank:
+
+| run | bank before | appraised | bank after |
+|---|---|---|---|
+| 1 | 5,000 | 18,808 | 24,528 |
+| 2 | 24,528 | 38,337 | 63,585 |
+| 3 | 63,585 | 77,394 | 141,699 |
+
+`sim.cash` is now the notes picked up on the current runway and nothing else. The bank is
+`_bank` in `main.gd` and never enters the simulation.
+
+**The obvious assertion does not catch it.** "The bank went up by the amount the reward screen
+said" is true either way, because both sides inflate together: the screen says R + bank and the
+bank goes up by R + bank. `test_a_runs_value_does_not_depend_on_the_bank` plays the same level
+twice with different amounts of money and demands the same answer, which is the only shape that
+separates them. Verified by reintroducing the bug.
+
+**MONEY IS NOW IN THE REFERENCE'S UNITS.** A level-one weaving run appraised at 18,273 where
+the reference rewards about 540 for a comparable run - thirty-four times out. That is not
+cosmetic: the only two shop prices ever observed are $1,000 and $4,000, and against 18,273 a
+run they are not prices at all. `VALUE_SCALE = 0.03` is one constant applied once in
+`appraise`, so PAR, the ruler, the pill and the ladder all move together. A level-one weaving
+run now pays **472**. `CASH_VALUE` went 45 -> 5, because the reference's price tags say `5 $`.
+
+**LEVEL_SCALE 1.55 was hyperinflationary.** A run's value multiplied EIGHTY TIMES over ten
+levels, so no fixed price list could mean anything: even after repricing, all seven shops were
+bought by level nine. At 1.20 it is 6.2x over ten levels and 38x over twenty - still a strong
+sense of getting richer, slow enough that a price list can span the game. It touches no
+recorded number, because `norm` divides by `scale_for(level)` and the golden is level one.
+
+**PAR = 450**, re-derived from the new means over six levels: idle 100, dodge 194, gather 172,
+weave 600, landing on 0 / 1 / 1 / 3 stars. Weaving is worth **6.0x** idling.
+
+### The ladder, measured by playing it
+
+The first version of this table divided each price by the mean run value over levels one to
+six and reported that the last shop took 75 runs. That number is meaningless - a run's value
+scales with the LEVEL, so a player on the seventh rung earns many times the mean of the first
+six. **Dividing a late price by early income measures a player who never got better.** It now
+plays the progression: weave every level, bank it, buy whatever is affordable.
+
+| Shop | Price | Reached at level |
+|---|---|---|
+| ONLINE SHOP | 1,000 *(observed)* | 3 |
+| BOUTIQUE | 2,500 | 5 |
+| SCENT SHOP | 4,000 *(observed)* | 6 |
+| LUXURY SHOP | 12,000 | 9 |
+| DEPARTMENT STORE | 38,000 | 12 |
+| ATELIER | 120,000 | 15 |
+| FLAGSHIP STORE | 420,000 | 20 |
+
+Owning everything is worth **3.0x** a fresh install, run for run.
+
 ### Still to build
 
 The SHOP button says "COMING SOON". The shop sells SHOPS - Online, Scent, Boutique, Luxury -

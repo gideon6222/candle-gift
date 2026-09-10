@@ -49,22 +49,22 @@ const ALL := [
 		"field": "has_scent", "value": true,
 	},
 	{
-		"id": LUXURY, "name": "LUXURY SHOP", "price": 9000.0,
+		"id": LUXURY, "name": "LUXURY SHOP", "price": 12000.0,
 		"blurb": "Ribbon and a bow at the gift table.",
 		"field": "wrap_level", "value": 1,
 	},
 	{
-		"id": DEPARTMENT, "name": "DEPARTMENT STORE", "price": 22000.0,
+		"id": DEPARTMENT, "name": "DEPARTMENT STORE", "price": 38000.0,
 		"blurb": "A whole floor of candles. Worth more again.",
 		"field": "earn_level", "value": 2,
 	},
 	{
-		"id": ATELIER, "name": "ATELIER", "price": 48000.0,
+		"id": ATELIER, "name": "ATELIER", "price": 120000.0,
 		"blurb": "The twist die, and then the star.",
 		"field": "press_level", "value": 2,
 	},
 	{
-		"id": FLAGSHIP, "name": "FLAGSHIP STORE", "price": 110000.0,
+		"id": FLAGSHIP, "name": "FLAGSHIP STORE", "price": 420000.0,
 		"blurb": "Boxed and finished. The best a candle gets.",
 		"field": "wrap_level", "value": 2,
 	},

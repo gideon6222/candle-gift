@@ -70,6 +70,11 @@ var _wipe_armed := false
 var _resume_phase: int = Phase.HOME
 var _sfx: Sfx
 var _prefs := {}
+## THE BANK, and it deliberately does not live in `Sim`.
+## `sim.cash` is the notes picked up on the current runway and nothing
+## else; `restart` zeroes it, and `appraise()` adds it to what the batch
+## is worth to get what the RUN was worth. What the player owns is here.
+var _bank := 0.0
 var _boost_candle: Button
 var _boost_cash: Button
 ## Fredoka, the reference's face: a rounded geometric sans. Loaded once and
@@ -903,7 +908,7 @@ func _on_wipe() -> void:
 	Save.wipe()
 	_state = Save.load_state()
 	_wipe_armed = false
-	sim.cash = 0.0
+	_bank = 0.0
 	sim.boost_candles = 0
 	sim.boost_cash = 1.0
 	sim.restart(1)
@@ -1060,7 +1065,7 @@ func _refresh_shop() -> void:
 		if Shops.owns(owned, id):
 			buy.text = "OWNED"
 			buy.disabled = true
-		elif Shops.can_buy(owned, sim.cash, id):
+		elif Shops.can_buy(owned, _bank, id):
 			buy.text = "%s $" % SimUtil.fmt(float(entry.price))
 			buy.disabled = false
 		else:
@@ -1090,14 +1095,14 @@ func _on_shop_drag(event: InputEvent) -> void:
 
 func _on_buy(id: String) -> void:
 	var owned: Array = _state.get("owned", [])
-	if not Shops.can_buy(owned, sim.cash, id):
+	if not Shops.can_buy(owned, _bank, id):
 		_sfx.play(Sfx.DENY)
 		return
 	var entry := Shops.by_id(id)
-	sim.cash -= float(entry.price)
+	_bank -= float(entry.price)
 	owned.append(id)
 	_state.owned = owned
-	_state.cash = sim.cash
+	_state.cash = _bank
 	## The stats are DERIVED from what is owned, so this is the one write and
 	## `_apply_save_to_sim` is the one read.
 	var stats := Shops.stats_for(owned)
@@ -1213,18 +1218,18 @@ EXTRA +1
 	_boost_cash.text = "CASH
 BONUS x1.5
 %s $" % SimUtil.fmt(BOOST_PRICE)
-	_boost_candle.disabled = sim.cash < BOOST_PRICE or sim.boost_candles > 0
-	_boost_cash.disabled = sim.cash < BOOST_PRICE or sim.boost_cash > 1.0
+	_boost_candle.disabled = _bank < BOOST_PRICE or sim.boost_candles > 0
+	_boost_cash.disabled = _bank < BOOST_PRICE or sim.boost_cash > 1.0
 
 
 func _on_boost_candles() -> void:
-	if sim.cash < BOOST_PRICE or sim.boost_candles > 0:
+	if _bank < BOOST_PRICE or sim.boost_candles > 0:
 		_sfx.play(Sfx.DENY)
 		return
-	sim.cash -= BOOST_PRICE
+	_bank -= BOOST_PRICE
 	sim.boost_candles += 1
 	_sfx.play(Sfx.BUY)
-	_state.cash = sim.cash
+	_state.cash = _bank
 	Save.store(_state)
 	## The boost changes what the batch STARTS as, so the level has to be laid
 	## out again for it to be there when the run begins.
@@ -1241,13 +1246,13 @@ func _on_boost_candles() -> void:
 
 
 func _on_boost_cash() -> void:
-	if sim.cash < BOOST_PRICE or sim.boost_cash > 1.0:
+	if _bank < BOOST_PRICE or sim.boost_cash > 1.0:
 		_sfx.play(Sfx.DENY)
 		return
-	sim.cash -= BOOST_PRICE
+	_bank -= BOOST_PRICE
 	sim.boost_cash = 1.5
 	_sfx.play(Sfx.BUY)
-	_state.cash = sim.cash
+	_state.cash = _bank
 	Save.store(_state)
 	_refresh_boosts()
 	_sync()
@@ -1375,7 +1380,7 @@ func _draw_reward_bg() -> void:
 
 ## The save is the source of truth for progress; the sim is where it is spent.
 func _apply_save() -> void:
-	sim.cash = float(_state.cash)
+	_bank = float(_state.cash)
 	sim.restart(int(_state.level))
 	_apply_save_to_sim()
 
@@ -1386,7 +1391,8 @@ func _apply_save() -> void:
 func _apply_save_to_sim() -> void:
 	if _state.is_empty():
 		return
-	sim.cash = float(_state.cash)
+	## NOT `sim.cash`. The simulation only ever holds this run's notes.
+	_bank = float(_state.cash)
 	## DERIVED FROM WHAT IS OWNED, not read out of the save's own copies.
 	## Those are still written so a downgrade does not lose everything, but
 	## `Shops` is the source of truth - a stat stored beside the list of
@@ -1470,8 +1476,8 @@ func _advance_interlude(dt: float) -> void:
 func _take_reward() -> void:
 	if _phase != Phase.REWARD:
 		return
-	sim.cash += _run_value
-	_state.cash = sim.cash
+	_bank += _run_value
+	_state.cash = _bank
 	_state.best = maxf(float(_state.best), _run_value)
 	_state.level = sim.level + 1
 	Save.store(_state)
@@ -1569,7 +1575,9 @@ func _sync() -> void:
 	_draw_stations()
 
 	_level_pill.text = "Level %d" % sim.level
-	_money_pill.text = "%s $" % SimUtil.fmt(sim.cash)
+	## Bank plus what this run has picked up, so the pill climbs as notes
+	## are collected and the number never jumps at the end of a level.
+	_money_pill.text = "%s $" % SimUtil.fmt(_bank + sim.cash)
 
 
 ## The camera is LOW and close behind. The bands run around a candle, so they

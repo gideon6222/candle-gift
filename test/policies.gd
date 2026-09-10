@@ -113,8 +113,25 @@ static func _gather(s: Sim) -> bool:
 
 ## Play one whole level with one policy and hand back the final state, plus the
 ## readings a balance pass wants that the golden does not carry.
-static func play(name: String, level: int = 1, seconds: float = 0.0) -> Dictionary:
+## `owned` is the list of SHOP IDS the player has bought, so a policy can be
+## measured as a player who owns things rather than only as a fresh install.
+##
+## Every number in NOTES.md was measured with this empty, which was right when
+## there was nothing to buy - but "the ladder is priced sensibly" is not a
+## question the no-upgrade case can answer at all.
+static func play(name: String, level: int = 1, seconds: float = 0.0,
+		owned: Array = []) -> Dictionary:
 	var s := Sim.new(level)
+	if not owned.is_empty():
+		var stats := Shops.stats_for(owned)
+		s.earn_level = int(stats.earn_level)
+		s.press_level = int(stats.press_level)
+		s.wrap_level = int(stats.wrap_level)
+		s.has_scent = bool(stats.has_scent)
+		## After the stats, because the batch and the station palettes are
+		## laid out from them - a scent station only exists on a runway
+		## built by a player who owns the scent shop.
+		s.restart(level)
 	var mem := {}
 	var step := 1.0 / 60.0
 	var limit := seconds if seconds > 0.0 else Tuning.level_seconds(level) + 3.0

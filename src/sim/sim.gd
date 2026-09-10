@@ -173,8 +173,17 @@ func earn_multiplier() -> float:
 
 
 ## What the run is worth at the gift table.
+## WHAT THIS RUN WAS WORTH. Not what the player has.
+##
+## `cash` is the notes picked up on THIS runway - `restart` zeroes it - and the
+## bank lives outside the simulation entirely. It was seeded from the save for a
+## while, and the result was that every run appraised the player's whole balance
+## as if they had just earned it, and then paid it into the balance again. A
+## bank of 5,000 went 24,528 -> 63,585 -> 141,699 over three runs of the same
+## level. It also made the whole shop ladder affordable in under five runs,
+## which is what the measurement was looking at when it found this.
 func appraise() -> float:
-	return batch_value() * Tuning.scale_for(level) * earn_multiplier() + cash
+	return batch_value() * Tuning.scale_for(level) * earn_multiplier() * Tuning.VALUE_SCALE + cash
 
 
 func stats() -> Dictionary:

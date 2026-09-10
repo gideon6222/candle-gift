@@ -43,6 +43,42 @@ func _initialize() -> void:
 			policy, int(r.count), float(r.colours), float(r.glitter),
 			int(r.dips), int(r.lost), int(r.gained), int(r.value)])
 
+	## THE LADDER, MEASURED BY PLAYING IT.
+	##
+	## The first version of this divided each price by the mean run value over
+	## levels one to six, and said the last shop took 75 runs. That number is
+	## meaningless: a run's value scales 1.55x per LEVEL, so a player who has
+	## reached the seventh rung is earning many times what the mean over the
+	## first six levels says. Dividing a late price by early income measures a
+	## player who never got better.
+	##
+	## So this plays the actual progression - weave, bank, buy whatever is
+	## affordable, move to the next level - and reports the level at which each
+	## shop is reached. That is the number a player experiences.
+	print("")
+	print("  playing the ladder: weave every level, buy when affordable")
+	print("  %-18s %10s %8s %12s" % ["shop", "price", "at level", "bank after"])
+	var owned: Array = []
+	var bank := 0.0
+	var bought := 0
+	for lvl in range(1, 61):
+		var r := Policies.play(Policies.WEAVE, lvl, 0.0, owned)
+		bank += float(r.value)
+		while true:
+			var nxt := Shops.next_for(owned)
+			if nxt.is_empty() or bank < float(nxt.price):
+				break
+			bank -= float(nxt.price)
+			owned.append(String(nxt.id))
+			bought += 1
+			print("  %-18s %10d %8d %12d" % [
+				String(nxt.name).substr(0, 18), int(nxt.price), lvl, int(bank)])
+		if owned.size() >= Shops.ALL.size():
+			print("  everything owned by level %d, bank %d" % [lvl, int(bank)])
+			break
+	if bought < Shops.ALL.size():
+		print("  only %d of %d shops reached in 60 levels" % [bought, Shops.ALL.size()])
+
 	print("")
 	print("  the golden, for pasting into test_golden.gd")
 	for policy in Policies.ALL:

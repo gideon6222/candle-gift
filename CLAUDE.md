@@ -83,6 +83,30 @@ phase, so a screen cannot be left up by a transition nobody thought about.
 waiting for a swipe. It is the same simulation either way - HOME differs only in not calling
 `advance` - so this is a starting phase, not a test-only path.
 
+## `sim.cash` is THIS RUN's notes. The bank is `_bank`, and it never enters the simulation
+
+`appraise()` is what the run was worth: the batch, scaled, plus the notes picked up on this
+runway. `restart` zeroes those. What the player owns is `_bank` in `main.gd`, written to the
+save, and spent by the shop and the boost cards.
+
+Seeding the bank into `sim.cash` made every run appraise the player's whole balance as if they
+had just earned it, and the reward screen banked it again - 5,000 became 141,699 in three runs
+of the same level. It also made the entire shop ladder affordable inside five runs, which is
+how it was found.
+
+**The obvious test does not catch this.** "The bank went up by what the screen said" holds
+either way, because both sides inflate together. The guard is
+`test_a_runs_value_does_not_depend_on_the_bank`: play the same level twice with different
+amounts of money and demand the same answer.
+
+## Money is in the reference's units
+
+`VALUE_SCALE = 0.03`, applied once in `appraise`. A level-one weaving run pays about 472; the
+reference rewards about 540 for a comparable run. Before it, ours paid 18,273 - and the only
+two shop prices ever observed are $1,000 and $4,000, which against 18,273 a run are not prices
+at all. Everything downstream (PAR, the ruler, the money pill, the ladder) is in those units,
+so they stay comparable to the footage.
+
 ## Anything that restarts a level owes it the save
 
 `Sim.restart()` zeroes `cash`: as far as the simulation is concerned that is per-run state.
