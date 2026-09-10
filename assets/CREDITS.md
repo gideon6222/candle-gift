@@ -17,6 +17,7 @@ not what went in.
 | `sfx/back.ogg` | Kenney *Interface Sounds* (`back_002`) | CC0 | renamed |
 | `sfx/knock.ogg` | Kenney *Impact Sounds* (`impactSoft_medium_002`) | CC0 | renamed |
 | `sfx/finish.ogg` | Kenney *Impact Sounds* (`impactBell_heavy_001`) | CC0 | renamed |
+| `music/wisdom.ogg`, `saying.ogg`, `swinging.ogg`, `dust.ogg` | OpenGameArt, *Short Loops Background Music Pack* by **hernandack** | CC0 | renamed |
 | `tex/wax_swirl.png` | ambientCG `Marble012`, **Color map** | CC0 | greyscale, Gaussian blur 9 at 1K, autocontrast, resized to 256 |
 
 ## Two things learned taking these
@@ -38,6 +39,18 @@ swirl, and speckle scrolled across a pool reads as television static. Blur hard
 at full size *then* downscale — blurring after the resize only smears the
 aliasing the resize introduced. 9 pixels of Gaussian at 1024 leaves the swirl and
 nothing else, and the file drops from 221 KB to 36 KB on the way.
+
+## The music is a CHOICE, not a track
+
+Four loops ship and the pause panel cycles them. That is not indecision: two
+music beds were generated for this game, one came back **"creepy"** and its
+replacement came back **"chirpy"**, and neither verdict was available to whoever
+wrote them. Judging music is exactly the job that cannot be done from the side
+that writes the code, and iterating on a taste question you have no access to is
+how a week goes sideways.
+
+`Kenney` has no loops at all — only Music Jingles, which are stingers. These came
+from OpenGameArt, which does.
 
 ## Not imported, and why
 

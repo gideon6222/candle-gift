@@ -43,11 +43,18 @@ common/physics_ticks_per_second=60
 
 [debug]
 
-## EVERY ERROR TO A FILE ON THE DEVICE.
-##
-## The phone crashes and there is no cable, so `user://logs/godot.log` is the
-## only evidence that survives. `blackbox.gd` shows its tail at the next boot
-## when the previous session did not exit cleanly.
+; EVERY ERROR TO A FILE ON THE DEVICE.
+;
+; The phone crashes and there is no cable, so a log on the device is the only
+; evidence that survives. `blackbox.gd` shows its tail at the next boot when the
+; previous session did not exit cleanly.
+;
+; NO `.pc` OVERRIDE HERE. Godot ships one as its own default, and adding another
+; alongside the plain key left `enable_file_logging` reading FALSE at runtime -
+; the first build with the black box in it came back from the phone saying "no
+; log file - file logging is off", which is exactly the failure this was meant to
+; rule out. Verified by printing the setting rather than by reading the docs.
+;
+; Semicolons, not `#`: project.godot is a ConfigFile.
 file_logging/enable_file_logging=true
-file_logging/enable_file_logging.pc=true
 file_logging/max_log_files=4

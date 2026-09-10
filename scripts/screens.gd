@@ -35,6 +35,7 @@ func _process(_d: float) -> bool:
 	_at += 1
 	if _at > 4:
 		print("wrote %s" % OS.get_user_data_dir())
+		_tear_down(_main)
 		quit(0)
 		return true
 	return false
@@ -78,3 +79,20 @@ func _pose(i: int) -> void:
 			_main._run_value = 18400.0
 			_main._beat_best = true
 			_main._set_phase(_main.Phase.REWARD)
+
+
+## TEAR THE SCENE DOWN BEFORE QUITTING.
+##
+## A `SceneTree` script that calls `quit()` with the game still in the tree exits
+## with "N resources still in use" - the audio streams and the shader materials
+## are still referenced by live nodes. It is only a shutdown message and it is
+## still noise, and this repo treats an engine error as a failure precisely so
+## that noise does not accumulate until nobody reads any of it.
+func _tear_down(node: Node) -> void:
+	if node == null:
+		return
+	if node.has_method("_sfx_stop"):
+		node.call("_sfx_stop")
+	if node.get_parent() != null:
+		node.get_parent().remove_child(node)
+	node.free()

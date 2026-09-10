@@ -10,10 +10,16 @@ extends RefCounted
 
 const PATH := "user://candlegift.settings.v1.json"
 
-## Both default to ON. A switch that defaults off reads as broken.
+## Sound is a switch. MUSIC IS A CHOICE: 0 is off, and 1..N pick a track.
+##
+## It is a choice because the person who has to live with it is the only one who
+## can judge it. Two generated beds were written for this game - one came back
+## "creepy" and its replacement came back "chirpy" - and neither verdict was
+## available to whoever wrote them. Four CC0 loops now ship with the game and the
+## pause panel cycles them, which turns a taste question into a button.
 const DEFAULTS := {
 	"sound": true,
-	"music": true,
+	"music_track": 1,
 }
 
 

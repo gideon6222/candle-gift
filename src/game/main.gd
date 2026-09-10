@@ -72,6 +72,7 @@ var _sfx: Sfx
 var _prefs := {}
 var _crash_report := ""
 var _crash: Control
+var _trace_at := 0.0
 ## THE BANK, and it deliberately does not live in `Sim`.
 ## `sim.cash` is the notes picked up on the current runway and nothing
 ## else; `restart` zeroes it, and `appraise()` adds it to what the batch
@@ -177,17 +178,22 @@ func _ensure_booted() -> void:
 		_crash_report = "LAST SESSION DID NOT EXIT
 %s
 
+TRACE (ours, one line a second):
+%s
+
+ENGINE LOG:
 %s" % [
-			BlackBox.last_session(), BlackBox.tail()]
+			BlackBox.last_session(), BlackBox.trace_tail(), BlackBox.tail()]
 		push_warning("previous session ended without a clean exit")
 	BlackBox.arm(Changelog.VERSION)
+	BlackBox.start_trace(Changelog.VERSION)
 	_state = Save.load_state()
 	_prefs = Settings.load_state()
 	_sfx = Sfx.new()
 	add_child(_sfx)
 	_sfx.build()
 	_sfx.enabled = bool(_prefs.sound)
-	_sfx.set_music(bool(_prefs.music))
+	_sfx.set_track(int(_prefs.music_track))
 	sim = Sim.new()
 	_build_world()
 	sim.level_finished.connect(_on_level_finished)
@@ -249,7 +255,9 @@ func _build_world() -> void:
 	## trace back to the light.
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(0.88, 0.91, 0.97)
-	e.ambient_light_energy = 0.78
+	## Lower than it was. At 0.78 a cream candle on a white runway blew out to
+	## pure white and lost its shading entirely - Gideon's word was "very bright".
+	e.ambient_light_energy = 0.55
 	e.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.environment = e
 	add_child(env)
@@ -1067,14 +1075,14 @@ func _close_pause() -> void:
 
 func _refresh_pause() -> void:
 	_sound_button.text = "SOUND   %s" % ("ON" if bool(_prefs.sound) else "OFF")
-	_music_button.text = "MUSIC   %s" % ("ON" if bool(_prefs.music) else "OFF")
+	_music_button.text = "MUSIC   %s" % _sfx.track_name()
 	_wipe_button.text = "TAP AGAIN TO ERASE" if _wipe_armed else "CLEAR SAVE DATA"
 
 
 func _toggle_sound() -> void:
 	_prefs.sound = not bool(_prefs.sound)
 	_sfx.enabled = bool(_prefs.sound)
-	_sfx.set_music(bool(_prefs.music))
+	_sfx.set_track(int(_prefs.music_track))
 	Settings.store(_prefs)
 	## Disarmed by anything else on the panel, so the second tap has to be a
 	## deliberate second tap rather than the next thing the thumb happens to do.
@@ -1083,9 +1091,17 @@ func _toggle_sound() -> void:
 	_refresh_pause()
 
 
+## CYCLES rather than toggles: off, then each track in turn, then off again.
+##
+## Four loops ship with the game and none of them can be judged from the side
+## that chose them. A button that walks the list puts the decision where it
+## belongs, and the choice persists like any other preference.
 func _toggle_music() -> void:
-	_prefs.music = not bool(_prefs.music)
-	_sfx.set_music(bool(_prefs.music))
+	var next := int(_prefs.music_track) + 1
+	if next > Sfx.TRACKS.size():
+		next = 0
+	_prefs.music_track = next
+	_sfx.set_track(next)
 	Settings.store(_prefs)
 	_wipe_armed = false
 	_sfx.play(Sfx.TAP)
@@ -1105,10 +1121,15 @@ func _on_wipe() -> void:
 		_crash_report = "LAST SESSION DID NOT EXIT
 %s
 
+TRACE (ours, one line a second):
+%s
+
+ENGINE LOG:
 %s" % [
-			BlackBox.last_session(), BlackBox.tail()]
+			BlackBox.last_session(), BlackBox.trace_tail(), BlackBox.tail()]
 		push_warning("previous session ended without a clean exit")
 	BlackBox.arm(Changelog.VERSION)
+	BlackBox.start_trace(Changelog.VERSION)
 	_state = Save.load_state()
 	_wipe_armed = false
 	_bank = 0.0
@@ -1624,6 +1645,13 @@ func _on_gear_input(event: InputEvent) -> void:
 ## A clean exit clears the marker. Anything that is not a clean exit - a kill, a
 ## driver reset, the OS reclaiming the app - leaves it, and the next boot shows
 ## the log.
+## For the headless runners, which quit with the scene still live.
+func _sfx_stop() -> void:
+	if _sfx != null:
+		_sfx.set_track(0)
+		_sfx.release()
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
 		Save.store(_state)
@@ -1651,6 +1679,33 @@ func _tick(dt: float) -> void:
 		_toast.modulate.a = clampf(_toast_t, 0.0, 1.0)
 	_advance_interlude(dt)
 	_sync()
+	_trace(dt)
+
+
+## A LINE A SECOND, FLUSHED, while the game is playing.
+##
+## The one record that survives a process being killed without a word - an OOM
+## or a driver reset prints nothing on its way out, which is the shape of a
+## crash that happens on one device and on no other. What the last line says was
+## happening is the whole diagnosis.
+##
+## Deliberately cheap and deliberately not every frame: a flush per frame is a
+## write per frame, which would itself be a plausible cause of a stutter on a
+## phone.
+func _trace(dt: float) -> void:
+	_trace_at += dt
+	if _trace_at < 1.0:
+		return
+	_trace_at = 0.0
+	var bands := 0
+	for m in _bands:
+		bands += m.multimesh.visible_instance_count
+	BlackBox.trace("t=%5.0f lv=%d ph=%d n=%2d bands=%3d z=%5.0f fps=%2d obj=%5d static=%4.0fMB video=%4.0fMB" % [
+		sim.time, sim.level, _phase, sim.count(), bands, sim.distance,
+		Engine.get_frames_per_second(),
+		Performance.get_monitor(Performance.OBJECT_COUNT),
+		Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0,
+		Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0])
 
 
 ## The only place the world can be started again.
@@ -1899,33 +1954,39 @@ func _draw_batch() -> void:
 				col = col.lerp(Color.WHITE, 0.10 * float(c.glitter))
 			if c.scent > 0:
 				col = col.lerp(Color(0.847, 0.706, 1.0), 0.16)
-			## A COAT, NOT A STRIPE.
+			## ONLY THE EXPOSED RING OF EACH COAT IS DRAWN.
 			##
-			## Each layer is a sleeve from the BASE of the candle up to its own
-			## height, at its own radius - so the newest wax is the widest and
-			## the lowest, and every earlier layer stays visible as a ring above
-			## it. Drawn oldest first, so the newer, wider coats cover the lower
-			## part of the ones under them, which is the order they went on.
+			## A dip coats the candle from the base up to a height, so the coats
+			## are NESTED - and drawing them nested put eight cylinders inside
+			## each other separated by twelve millimetres of radius. At the size
+			## a candle is on screen that is sub-pixel, so they Z-FIGHT: the
+			## batch came back from the phone as a bright slab with black arcs
+			## scrawled across it.
 			##
-			## It used to be one slice of the candle's length per layer, each at
-			## a different radius, which builds a stepped cone - "little blocks"
-			## on the phone, and that is exactly what it was.
-			var h := offs[b]
+			## The fix is not more separation - that was the earlier version, and
+			## eight visible steps made the candle a stack of plates. Every coat
+			## is only ever SEEN between the top of the coat outside it and its
+			## own top, so that band is the only part worth drawing. Same
+			## picture, no hidden geometry, nothing to fight.
+			var hi := offs[b]
+			var lo := offs[b + 1] if b + 1 < offs.size() else 0.0
+			var seg := maxf(0.02, hi - lo)
+			var mid := (hi + lo) * 0.5
 			var basis: Basis
 			var at: Vector3
 			if t > 0.5:
-				basis = Basis.IDENTITY.scaled(Vector3(r * 2.0, h, r * 2.0))
-				at = Vector3(p.x, h * 0.5, p.y)
+				basis = Basis.IDENTITY.scaled(Vector3(r * 2.0, seg, r * 2.0))
+				at = Vector3(p.x, mid, p.y)
 			else:
-				## Lying down the coat runs across the lane, from the wick end.
+				## Lying down the candle runs across the lane, wick end first.
 				## `Basis.scaled()` scales the WORLD axes, not the mesh's own, so
-				## the scale vector is written in the orientation the sleeve ENDS
+				## the scale vector is written in the orientation the band ENDS
 				## UP in rather than the one the cylinder starts in. Rotated
 				## about Z its axis is world X; backwards, the batch draws as a
 				## heap of overlapping boxes - a transform bug that looks like a
 				## layout one.
-				basis = Basis(Vector3(0, 0, 1), PI * 0.5).scaled(Vector3(h, r * 2.0, r * 2.0))
-				at = Vector3(p.x - len * 0.5 + h * 0.5, radii[0], p.y)
+				basis = Basis(Vector3(0, 0, 1), PI * 0.5).scaled(Vector3(seg, r * 2.0, r * 2.0))
+				at = Vector3(p.x - len * 0.5 + mid, radii[0], p.y)
 			if n < BANDS:
 				mm.set_instance_transform(n, Transform3D(basis, at))
 				mm.set_instance_color(n, col)

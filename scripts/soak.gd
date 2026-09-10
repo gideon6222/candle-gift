@@ -66,6 +66,7 @@ func _process(delta: float) -> bool:
 		print("  survived %.0f s. peak instance counts against their pools:" % _t)
 		for k in _peak:
 			print("    %-14s %4d / %4d" % [k, _peak[k][0], _peak[k][1]])
+		_tear_down(_main)
 		quit(0)
 		return true
 	return false
@@ -94,3 +95,20 @@ func _watch() -> void:
 		total += m.multimesh.visible_instance_count
 	if not _peak.has("bands(all)") or total > _peak["bands(all)"][0]:
 		_peak["bands(all)"] = [total, _main._bands[0].multimesh.instance_count]
+
+
+## TEAR THE SCENE DOWN BEFORE QUITTING.
+##
+## A `SceneTree` script that calls `quit()` with the game still in the tree exits
+## with "N resources still in use" - the audio streams and the shader materials
+## are still referenced by live nodes. It is only a shutdown message and it is
+## still noise, and this repo treats an engine error as a failure precisely so
+## that noise does not accumulate until nobody reads any of it.
+func _tear_down(node: Node) -> void:
+	if node == null:
+		return
+	if node.has_method("_sfx_stop"):
+		node.call("_sfx_stop")
+	if node.get_parent() != null:
+		node.get_parent().remove_child(node)
+	node.free()

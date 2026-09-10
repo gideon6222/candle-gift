@@ -131,7 +131,7 @@ func test_settings_and_progress_do_not_share_a_file(t: TestHarness) -> void:
 	Save._reset_latch_for_tests()
 	Settings.wipe()
 	Save.store({"cash": 999.0, "level": 3})
-	Settings.store({"sound": false, "music": false})
+	Settings.store({"sound": false, "music_track": 0})
 
 	var s := Save.load_state()
 	t.approx(s.cash, 999.0, 0.01, "writing settings disturbed the save")
@@ -141,7 +141,7 @@ func test_settings_and_progress_do_not_share_a_file(t: TestHarness) -> void:
 	Save.wipe()
 	var prefs := Settings.load_state()
 	t.eq(prefs.sound, false, "wiping the save also reset the sound switch")
-	t.eq(prefs.music, false, "wiping the save also reset the music switch")
+	t.eq(int(prefs.music_track), 0, "wiping the save also reset the music choice")
 	Save._reset_latch_for_tests()
 
 
@@ -158,12 +158,12 @@ func test_a_settings_key_added_later_defaults_on(t: TestHarness) -> void:
 	f = null
 	var s := Settings.load_state()
 	t.eq(s.sound, false, "an explicit false was not respected")
-	t.eq(s.music, true, "a key the file has never heard of read as OFF")
+	t.eq(int(s.music_track), 1, "a key the file has never heard of read as its non-default")
 
 
 func test_settings_survive_a_round_trip(t: TestHarness) -> void:
 	Settings.wipe()
-	Settings.store({"sound": false, "music": true})
+	Settings.store({"sound": false, "music_track": 3})
 	var s := Settings.load_state()
 	t.eq(s.sound, false, "sound did not survive a round trip")
-	t.eq(s.music, true, "music did not survive a round trip")
+	t.eq(int(s.music_track), 3, "the music choice did not survive a round trip")

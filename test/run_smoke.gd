@@ -571,7 +571,7 @@ func _check_the_pause_panel(main) -> void:
 	## wrong order, and either way it is not testing what it says.
 	main._prefs = Settings.load_state()
 	main._sfx.enabled = bool(main._prefs.sound)
-	main._sfx.set_music(bool(main._prefs.music))
+	main._sfx.set_track(int(main._prefs.music_track))
 	main.freeze()
 	main.advance(4.0, 1.0 / 60.0)
 	_t.eq(main._phase, main.Phase.RUN, "the harness is not in a run, so pausing proves nothing")
@@ -599,9 +599,18 @@ func _check_the_pause_panel(main) -> void:
 	_t.eq(Settings.load_state().sound, false, "the sound switch was not saved")
 	_t.eq(main._sound_button.text.contains("OFF"), true, "the switch does not say it is off")
 
-	_press(main._music_button)
-	_t.eq(main._sfx.music_enabled, false, "the music switch did not turn the music off")
-	_t.eq(Settings.load_state().music, false, "the music switch was not saved")
+	## MUSIC CYCLES through the shipped tracks and then off, and the button says
+	## which one. A toggle would have been a lie: there are four.
+	var seen := {}
+	for i in Sfx.TRACKS.size() + 1:
+		_press(main._music_button)
+		seen[main._sfx.music_track] = true
+		_t.eq(int(Settings.load_state().music_track), main._sfx.music_track,
+			"the music choice was not saved")
+	_t.eq(seen.size(), Sfx.TRACKS.size() + 1,
+		"cycling the music button did not reach every track and off")
+	_t.ok(main._music_button.text.contains(main._sfx.track_name()),
+		"the music button does not name the track it is playing")
 
 	## CLEARING THE SAVE TAKES TWO TAPS. One tap next to two switches is a run of
 	## progress gone to a mis-tap, and there is nothing behind it.
@@ -633,7 +642,8 @@ func _check_the_pause_panel(main) -> void:
 		"a save after the wipe put the progress back")
 
 	## PREFERENCES ARE NOT PROGRESS: erasing the save left the switches alone.
-	_t.eq(Settings.load_state().music, false, "wiping the save reset the music switch")
+	_t.eq(int(Settings.load_state().music_track), main._sfx.music_track,
+		"wiping the save reset the music choice")
 	Save._reset_latch_for_tests()
 
 
@@ -819,9 +829,15 @@ func _check_the_imported_sounds_loaded(main) -> void:
 	for name in [Sfx.TAP, Sfx.CONFIRM, Sfx.DENY_UI, Sfx.BACK, Sfx.KNOCK]:
 		_t.ok(built.has(name), "the imported sound '%s' did not load" % name)
 
-	## And the music is a LOOP. A bed that plays once and stops is a bug nobody
-	## notices for a week, because it sounds fine for the first thirty seconds.
-	var bed: AudioStreamWAV = main._sfx._music.stream
-	_t.ok(bed != null, "there is no music bed")
-	_t.eq(bed.loop_mode, AudioStreamWAV.LOOP_FORWARD, "the music does not loop")
-	_t.gt(float(bed.data.size()), 0.0, "the music bed has no samples in it")
+	## EVERY SHIPPED TRACK LOADS AND LOOPS. An imported Ogg does not loop unless
+	## it is told to, and a bed that plays once and stops is a bug nobody notices
+	## for a week - it sounds fine for the first thirty seconds.
+	for i in range(1, Sfx.TRACKS.size() + 1):
+		main._sfx.set_track(i)
+		var bed: AudioStream = main._sfx._music.stream
+		_t.ok(bed != null, "track %d did not load" % i)
+		if bed is AudioStreamOggVorbis:
+			_t.eq((bed as AudioStreamOggVorbis).loop, true, "track %d does not loop" % i)
+		_t.gt(bed.get_length(), 4.0, "track %d is too short to be a bed" % i)
+	main._sfx.set_track(0)
+	_t.eq(main._sfx.track_name(), "OFF", "track 0 is not off")

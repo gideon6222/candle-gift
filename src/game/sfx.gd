@@ -43,7 +43,7 @@ const BACK := "back"
 const KNOCK := "knock"
 
 var enabled := true
-var music_enabled := true
+var music_track := 1
 
 var _streams := {}
 var _voices: Array[AudioStreamPlayer] = []
@@ -56,7 +56,10 @@ func _ready() -> void:
 	## The preference may have been set before this node was in the tree - a
 	## headless harness boots the scene explicitly and `_ready` has not run
 	## yet - so the music is started here rather than there.
-	set_music(music_enabled)
+	## The choice may have been made before this node was in the tree - a
+	## headless harness boots the scene explicitly and `_ready` has not run
+	## yet - so the track is started here rather than there.
+	set_track(music_track)
 
 
 ## Idempotent and callable before the first frame, for the same reason
@@ -99,8 +102,7 @@ func build() -> void:
 	## changes, and now they do not trust the other one either.
 	_music = AudioStreamPlayer.new()
 	_music.bus = "Master"
-	_music.stream = _make_bed()
-	_music.volume_db = -14.0
+	_music.volume_db = -13.0
 	add_child(_music)
 
 	for i in VOICES:
@@ -143,99 +145,57 @@ func _make(seconds: float, freq: float, gain: float, sweep: float,
 	return w
 
 
-## AN UPBEAT LOOP, and the last one was genuinely creepy.
+## THE MUSIC IS IMPORTED NOW, and there are four of them.
 ##
-## Gideon's words. The old bed was a root, a fifth and an octave held together
-## with a slow swell - which is not a bad synth, it is a drone, and a drone in a
-## minor-leaning set is how you write dread. Three things fix it and none of them
-## is fidelity:
+## Two generated beds were written for this game. The first was a root, a fifth
+## and an octave under a slow swell, and Gideon's word for it was "creepy" - that
+## is a drone, and a drone is how you write dread. The second added a major
+## cadence, a plucked arpeggio and a kick, and came back "chirpy".
 ##
-##   - A MAJOR PROGRESSION with a real cadence: I - V - vi - IV, the four chords
-##     every cheerful pop song is built from.
-##   - MOVEMENT. A bouncing arpeggio at a quaver, so something happens eight
-##     times a bar instead of once every four.
-##   - A PULSE. A soft kick on the beat. A loop with no rhythm floats; the thing
-##     that makes music feel happy rather than ambient is that it has a tempo you
-##     can nod to.
-##
-## 120 BPM, sixteen bars of two seconds, thirty-two seconds. Still generated
-## rather than imported, because there is nothing to import: Kenney's audio packs
-## are the CC0 library this project uses and they have jingles, not loops.
-func _make_bed() -> AudioStreamWAV:
-	const BPM := 120.0
-	const BEAT := 60.0 / BPM
-	const BARS := 16
-	var bar_seconds := BEAT * 4.0
-
-	## I - V - vi - IV in C, as semitone offsets from the root of each chord, and
-	## the arpeggio walks root-third-fifth-octave up and back down.
-	var roots: Array[float] = [261.63, 392.00, 440.00, 349.23]   # C, G, A, F
-	var steps: Array[float] = [1.0, 1.25, 1.5, 2.0, 1.5, 1.25]   # major triad, up and down
-
-	var n := int(RATE * bar_seconds * float(BARS))
-	var data := PackedByteArray()
-	data.resize(n * 2)
-	var arp_phase := 0.0
-	var bass_phase := 0.0
-	var pad_phase := 0.0
-
-	for i in n:
-		var t := float(i) / float(RATE)
-		var bar := int(t / bar_seconds) % 4
-		var root: float = roots[bar]
-		var in_bar := fposmod(t, bar_seconds)
-
-		## The arpeggio: a new note every quaver, each one plucked.
-		var eighth := BEAT * 0.5
-		var step_i := int(in_bar / eighth) % steps.size()
-		var into := fposmod(in_bar, eighth) / eighth
-		arp_phase += TAU * root * 2.0 * steps[step_i] / float(RATE)
-		## A short percussive envelope per note is what makes it bounce; held, the
-		## same notes are a drone again.
-		var pluck := pow(1.0 - into, 2.2)
-		var arp := sin(arp_phase) * pluck * 0.34
-
-		## The bass: the chord root, an octave down, held for the bar.
-		bass_phase += TAU * root * 0.5 / float(RATE)
-		var bass := sin(bass_phase) * 0.30
-
-		## A pad underneath, quiet, for warmth.
-		pad_phase += TAU * root * 1.5 / float(RATE)
-		var pad := sin(pad_phase) * 0.10
-
-		## The kick, on every beat. A sine sweeping down fast is a kick drum.
-		var into_beat := fposmod(t, BEAT) / BEAT
-		var kick := sin(TAU * (52.0 + 60.0 * pow(1.0 - into_beat, 3.0)) * t)
-		kick *= pow(1.0 - into_beat, 7.0) * 0.42
-
-		var v := arp + bass + pad + kick
-		## Fade the very ends into each other, or the loop clicks.
-		var edge := minf(1.0, minf(t, float(n) / float(RATE) - t) / 0.25)
-		data.encode_s16(i * 2, int(clampf(v * edge * 0.62, -1.0, 1.0) * 32767.0))
-
-	var w := AudioStreamWAV.new()
-	w.format = AudioStreamWAV.FORMAT_16_BITS
-	w.mix_rate = RATE
-	w.stereo = false
-	w.loop_mode = AudioStreamWAV.LOOP_FORWARD
-	w.loop_begin = 0
-	w.loop_end = n
-	w.data = data
-	return w
+## The lesson is not that the second attempt was badly written. It is that
+## nobody writing it could hear it: judging music is exactly the job that cannot
+## be done from this side, and iterating on a taste question you have no access
+## to is how you spend a week going sideways. Four CC0 loops from OpenGameArt
+## ship instead, and the pause panel cycles them - the question goes to the only
+## person who can answer it.
+const TRACKS := [
+	{"id": "wisdom", "name": "WISDOM"},
+	{"id": "saying", "name": "SAYING"},
+	{"id": "swinging", "name": "SWINGING"},
+	{"id": "dust", "name": "DUST"},
+]
 
 
-func set_music(on: bool) -> void:
-	music_enabled = on
-	## `play()` errors with "Playback can only happen when a node is inside
-	## the scene tree" otherwise, and the flag above is enough: `_ready` calls
-	## this again once it is. The error was printed by a suite that reported
-	## itself as passing, which is its own small lesson.
+## 0 is off; 1..TRACKS.size() pick one. Out of range is treated as off rather
+## than clamped, so a save from a future version with more tracks in it goes
+## quiet instead of playing the wrong thing.
+func set_track(index: int) -> void:
+	music_track = index
 	if _music == null or not _music.is_inside_tree():
 		return
-	if on and not _music.playing:
-		_music.play()
-	elif not on and _music.playing:
+	if index < 1 or index > TRACKS.size():
 		_music.stop()
+		return
+	var res := load("res://assets/music/%s.ogg" % TRACKS[index - 1].id)
+	if res == null:
+		_music.stop()
+		return
+	_music.stream = res
+	## Every one of these is a LOOP that was published as a loop, but an
+	## `AudioStreamOggVorbis` does not loop unless it is told to, and a bed that
+	## plays once and stops is a bug nobody notices for a week.
+	if res is AudioStreamOggVorbis:
+		res.loop = true
+	_music.play()
+
+
+func track_name() -> String:
+	if music_track < 1 or music_track > TRACKS.size():
+		return "OFF"
+	return String(TRACKS[music_track - 1].name)
+
+
+
 
 
 func play(name: String, pitch: float = 1.0) -> void:
@@ -265,3 +225,15 @@ func play_dip(layer: int) -> void:
 
 func names() -> Array:
 	return _streams.keys()
+
+
+## Drop every stream reference, for the headless runners that quit with the
+## scene still live. Nothing in the game calls this.
+func release() -> void:
+	if _music != null:
+		_music.stop()
+		_music.stream = null
+	for p in _voices:
+		p.stop()
+		p.stream = null
+	_streams.clear()
