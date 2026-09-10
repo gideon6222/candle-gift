@@ -1,5 +1,152 @@
 # Notes — Candle Gift
 
+## Round five, 2026-09-10 — upgrading against the intent rather than the defect list
+
+Gideon asked for the game to be brought up to the framework and for every aspect to be
+upgraded toward what he originally asked for, "rather than just modifying things that are
+having issues". So the unit of work was the gap between the game and the 2026-09-07 ask —
+"an upgraded version with similar art style and better graphics", "better than the one she
+remembers" — not the last bug report.
+
+Nine of eleven boxes. What was measured on the way:
+
+### The sun had never cast a shadow
+
+`shadow_enabled` was never set, so every candle, obstacle and station floated on a flat white
+road. On a plain surface a shadow is the only cue for how high a thing sits, and this was the
+single largest reason the game read flatter than the reference.
+
+Orthogonal over 80 m rather than PSSM: everything this game is judged on lives inside about
+seventy metres of the camera, and it is the split count rather than the map size that costs on
+a mobile tiler. Bias 0.022/0.6 rather than the default 0.1/2.0, which is sized for a scene many
+times this extent and detached every candle's shadow from its base — reading as hovering, the
+exact fault shadows were added to fix. `shadow_opacity` 0.62, because a full shadow term under
+thirty candles greys the runway.
+
+**Cost, measured at 1080x2340 over four runs of 240 frames each: shadows on 1.02-1.21 ms, off
+0.95-1.19 ms.** The difference is smaller than the run-to-run spread, so the honest statement
+is that it is below this harness's noise floor on a 2060 SUPER — which says nothing about the
+Adreno, where there is still no device attached. `scripts/gpucost.gd -- noshadow` is the
+comparison.
+
+Fog is depth fog in the sky's own horizon colour, beginning at 95 m — beyond the ~60 m the
+player reads obstacles at, because fog inside that distance is hiding the game to look pretty.
+
+### THE CAMERA WAS FRAMING THE WRONG END OF THE BATCH
+
+The lens sat `11.5 + tail * 0.45` behind the LEADER with `tail` clamped at 16 m. A full batch
+is thirty candles at `TRAIL_GAP` = 18 m, so the camera pulled back 18.7 m for something 18 m
+long. Worst position of any candle down the frame while weaving, 1.0 being the bottom edge:
+
+| | L1 | L3 | L6 | L10 | L14 |
+|---|---|---|---|---|---|
+| before | 0.98 | 1.08 | 1.42 | 1.37 | — |
+| after | 0.95 | 0.95 | 0.95 | 0.95 | 0.96 |
+
+Nearly half a screen of the player's own batch was below the frame on level six, and it got
+worse as the game went on because the batch is what grows. **Level one was 0.98 — just inside
+the edge — which is how this hid for four rounds.**
+
+Two tuned constants were keeping one promise between them. `FRAME_TAIL_AT` states the promise
+and a sixteen-step bisection solves for a pullback that meets it: deterministic, so the golden
+and the contact sheet still agree; lower-bounded at the old 11.5, so a batch of one is framed
+exactly as before.
+
+Three things it took, all recorded in the shared notes' `inbox/`:
+
+- **The first probe measured the LEADER** and reported a comfortable 0.71 across three levels
+  while the contact sheet plainly showed clipping. The leader is the end that was never at
+  risk. A probe that disagrees with a picture you are looking at is measuring the wrong thing.
+- **`get_global_transform()` outside the tree returns IDENTITY** after printing an error, so
+  the first version measured everything against a camera at the origin and reported a
+  confident, uniform "behind the lens" for a whole level. The repo already had this rule for
+  the writing side (`Transform3D.looking_at`); it governs reading too.
+- **A flat "way off" sentinel made every off-screen candle compare EQUAL**, so the worst-case
+  search kept the first one found rather than the worst. It held to level six and broke at
+  level ten.
+
+The easing is asymmetric, 9.0 out and 1.6 in. Pulling back is the frame keeping up with a
+batch that just got longer and lagging there IS the clipping (1.37 on level ten with one
+symmetric rate); coming back in is only comfort, and snapping it right after an obstacle takes
+half the batch punishes the player twice.
+
+`scripts/framing.gd` reports the number and delegates to `main._frac_of`, so the probe and the
+rule cannot drift apart.
+
+### Value was invisible at the moment it changed
+
+The reference floats a green `+143$` where value was added; this had one 2D toast in a corner
+saying `-3`. Money and batch size are the two axes the whole game is about.
+
+Now green `+N $` at the note, gold `+1` at the candle, coral `-N` at the obstacle, pooled
+sixteen and round-robin — a whole slab crossing a pool fires one event per candle in the same
+frame, so a node per event is the `_dress_rig` material fault again.
+
+**A floater is FIXED SIZE.** Sized in world units its height on screen is its distance from the
+lens, and it spawns at the batch, which is the nearest thing to the camera: the first build put
+a `+1` about three metres out whose plus sign alone covered a third of the frame. The size is
+stated once as a fraction of frame height and `pixel_size` is derived from it and `CAM_FOV`.
+
+### `note_value()` — three readings of one fact that had already drifted
+
+A note is worth `CASH_VALUE * scale_for(level) * earn_multiplier()`. The first floater was
+built from the constant, so on level six with an earning shop the game said `+5 $` and the
+bank received seventeen. The signal now carries the amount, the price tag shows it, `cash`
+receives it, and `sim.note_value()` is the only place it is worked out. **The guard runs at
+level six WITH an earning shop and asserts the fixture first** — at level one with no shops
+the scale is 1.0 and every wrong version agrees.
+
+Only the nearest six tags carry a number: a tag is a MultiMesh instance and text is a node,
+and at twenty metres the digits are noise anyway.
+
+### The podium, off REFERENCE.md's own "still open" list
+
+Dark navy, the only dark surface in the game, because every pale candle is nearly the colour
+of the road it stands on. The batch rides up onto it rather than cutting, since the reference
+never cuts. Lifted by moving the five MultiMesh NODES rather than the instance transforms, so
+there is one place the lift can be got wrong instead of a dozen; the dais height and the lift
+are one constant because a batch that did not rise with the dais would stand inside it.
+
+The first screenshot of the screen showed two coral hazards standing ON the podium — the
+finish line is not a wall, so things spawned near it rise with the dais. The runway now empties
+for the presentation. It also showed a long batch running off the left edge: the framing solve
+governs down the frame and says nothing about across it, so the lens pulls back further and
+centres while presenting, added AFTER the solve so its guarantee still holds.
+
+### Two framework gaps that were simply absent
+
+**The back button.** Neither half existed — no setting, no handler — so Android's default
+applied and a back press mid-run quit the app and threw the run away. Importing the setting
+alone would have been worse: a dead button reads as a hung app. Both halves in one commit,
+unwinding one layer per press. Back on the reward screen does what TAKE does, because a back
+press must never be the one way off a screen that would lose the run's money. `_go_back()`
+returns the decision and `_notification` calls `quit()` — the first version really quit, which
+ended the test process and made the branch that matters most the one nobody could assert.
+
+**Version drift.** `Changelog.VERSION` and `version/name` in each of the two export presets are
+one fact in three files that no code derives. Asserted by count as well as by value, so losing
+the key entirely cannot pass vacuously.
+
+### The game can be filmed, for the first time
+
+No `movie.ps1` and no `test/replays` had ever existed here, so every judgement of how this game
+MOVES came from headless contact sheets — chosen moments of the simulation, never a real frame
+reacting to a real touch.
+
+The first filmed run died on the bug the same morning's digest had folded in and the template
+still carries: under `$ErrorActionPreference = 'Stop'` a native command's stderr terminates the
+script before `$LASTEXITCODE` is read, and **Godot writes a leak warning to stderr on every
+normal exit**, so `movie.ps1` could never have completed once on this machine. 480 frames were
+already on disk when it threw. Fixed here with a `Native` helper; still owed to
+`C:\dev\godot-template`.
+
+### Open, and deliberately not chased
+
+`2 resources still in use at exit` and `4 ObjectDB instances were leaked at exit` appear
+intermittently on `check.sh` and on every filmed run. Shutdown warnings rather than runtime
+faults, and the suites are green. Recorded so nobody reads them later as evidence of something
+else.
+
 ## Graphics pass, 2026-09-09
 
 Judged from a **contact sheet** (`scripts/sheet.gd` + `scripts/sheet.py`), which renders
