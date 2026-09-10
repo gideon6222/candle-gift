@@ -259,12 +259,69 @@ func _build_world() -> void:
 	## pure white and lost its shading entirely - Gideon's word was "very bright".
 	e.ambient_light_energy = 0.55
 	e.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
+
+	## DEPTH FOG, in the sky's own horizon colour.
+	##
+	## The runway is 1200 m of white box and the camera can see 420 m of it, so
+	## before this the road ran to a hard vanishing point with a crisp edge
+	## against the sky and the level read as a paper cut-out. Fog in the horizon
+	## colour makes the far end BECOME the sky rather than stop against it.
+	##
+	## The colour is `SKY`, not something chosen: the gradient's horizon end is
+	## the one colour the road can fade into without a visible join, and the
+	## reason the sky is only allowed to go darker upward is the same reason.
+	##
+	## `fog_sun_scatter` stays at 0. It tints the fog toward the sun's colour
+	## near the sun, which on a stylised flat sky puts a warm smear in one corner
+	## of an otherwise even backdrop.
+	e.fog_enabled = true
+	e.fog_mode = Environment.FOG_MODE_DEPTH
+	e.fog_light_color = SKY
+	e.fog_light_energy = 1.0
+	e.fog_sun_scatter = 0.0
+	## Starts BEYOND the far end of the playable read. The strategy guide's whole
+	## point is that the player reads obstacles well before they arrive, so fog
+	## that begins inside that distance would be hiding the game to look pretty.
+	## The furthest station the player steers by sits about 60 m out; fog starts
+	## at 95 and is total by 300.
+	e.fog_depth_begin = 95.0
+	e.fog_depth_end = 300.0
+	e.fog_depth_curve = 0.85
+	e.fog_density = 1.0
 	env.environment = e
 	add_child(env)
 
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-58, -34, 0)
 	sun.light_energy = 1.0
+	## SHADOWS. Nothing in this game cast one until now, which is the single
+	## largest reason it read as flatter than the reference: every candle,
+	## obstacle and station floated on a white road with no contact at all, and
+	## on a flat surface a shadow is the ONLY cue for how high a thing sits.
+	##
+	## Orthogonal, not PSSM. PSSM spends its splits on distance, and everything
+	## this game is judged on lives inside about seventy metres of the camera -
+	## a single split over a short range is both cheaper and sharper here. It is
+	## the split count, not the map size, that costs on a mobile tiler.
+	sun.shadow_enabled = true
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	## The camera sits ~11.5 m behind the batch and the player reads to ~60 m
+	## ahead, so 80 covers everything that is ever looked at with room for the
+	## tail of a long batch behind the lens.
+	sun.directional_shadow_max_distance = 80.0
+	sun.directional_shadow_fade_start = 0.85
+	## Tuned against the acne/peter-panning pair rather than left at the default.
+	## The default 0.1/2.0 is sized for a scene many times this one's extent; at
+	## 80 m of range over one split it detached every candle's shadow from its
+	## base by a visible gap, which reads as hovering - the exact fault shadows
+	## were added to fix.
+	sun.shadow_bias = 0.022
+	sun.shadow_normal_bias = 0.6
+	## NOT a black shadow. The reference is a bright toy factory and a full
+	## shadow term under every candle turns the runway grey and busy. Two thirds
+	## reads as contact without darkening the road.
+	sun.shadow_opacity = 0.62
+	sun.shadow_blur = 1.2
 	add_child(sun)
 
 	_cam = Camera3D.new()
@@ -288,6 +345,9 @@ func _build_world() -> void:
 	## No line on the stripes: they are seen almost edge-on the whole time,
 	## which is exactly where a fresnel rim darkens a whole face.
 	_stripes = _mm(_box(Tuning.ROAD_HALF_WIDTH * 2.0, 0.06, 1.1), STRIPE, 64, false, 0.0)
+	## A 6 cm slab lying ON the road casts a shadow that is all bias artefact and
+	## no information - it is the classic acne surface. The stripes ARE the road.
+	_stripes.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 	# the batch
 	for m in Wax.MOULDS.size():
@@ -322,6 +382,11 @@ func _build_world() -> void:
 	# scenery: pale stacked-cylinder candle towers, well below the track
 	_towers = _mm(_cyl(1.0, 1.0, 1.0, 10), TOWER, POOL * 2, false, 0.22)
 	_tower_tips = _mm(_cyl(0.0, 0.62, 1.3, 8), GOLD, POOL, false, 0.22)
+	## The skyline stands thirteen metres BELOW the track and to the side, so it
+	## can only ever shadow itself, off screen. Casting from it spends shadow
+	## resolution on geometry no shadow of which is visible.
+	_towers.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_tower_tips.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 	for i in STATION_SLOTS:
 		_rigs.append(_make_rig())

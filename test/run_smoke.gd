@@ -102,6 +102,8 @@ func _run(main) -> void:
 	_check_the_palette(main)
 	_check_the_pool_clears_the_stripes(main)
 	_check_no_gantry_is_left_behind(main)
+	_check_the_world_casts_shadows(main)
+	_check_the_far_end_fades_into_the_sky(main)
 	_check_a_tap_on_a_card_does_not_start_the_run(main)
 	_check_progress_is_saved(main)
 	await _check_the_shop_sells_shops(main)
@@ -288,6 +290,89 @@ func _check_the_pool_clears_the_stripes(main) -> void:
 				"a wax pool at y=%.3f does not clear the stripe tops at y=%.3f"
 					% [liq.position.y, stripe_top])
 	_t.gt(float(pools), 0.0, "no wax pools were found at all")
+
+
+## THE SUN CASTS, AND THE THINGS THE PLAYER JUDGES HEIGHT BY RECEIVE.
+##
+## Every object in this game sat on a flat white road with no contact shadow at
+## all, which is most of why it read flatter than the reference: on a plain
+## surface a shadow is the only cue for how high a thing is above it.
+##
+## Asserted as the light's own properties rather than in pixels. A shadow is a
+## boolean plus a range, both exact in the model, and `run_visual.gd` was given
+## two chances at a comparable "is the picture darker" statistic and could not
+## separate a broken build from a healthy one by more than a few percent.
+##
+## The two exemptions are asserted too, because turning shadow casting off is
+## how this gets quietly undone one node at a time: the stripes are a 6 cm slab
+## lying ON the road (all bias artefact, no information) and the skyline stands
+## thirteen metres below the track where nothing it casts can be seen.
+func _check_the_world_casts_shadows(main) -> void:
+	_t.begin("smoke > the world casts shadows")
+	var sun: DirectionalLight3D = null
+	for c in main.get_children():
+		if c is DirectionalLight3D:
+			sun = c
+			break
+	_t.ok(sun != null, "no DirectionalLight3D in the scene at all")
+	if sun == null:
+		return
+	_t.ok(sun.shadow_enabled, "the sun does not cast shadows, so nothing touches the road")
+	## The camera sits ~11.5 m back and the player reads to ~60 m ahead. A range
+	## short enough to drop the stations is worse than none: shadows that appear
+	## as a thing approaches are a popping artefact rather than grounding.
+	_t.gt(sun.directional_shadow_max_distance, 70.0,
+		"shadow range %.1f m is shorter than the ~60 m the player steers by"
+			% sun.directional_shadow_max_distance)
+	## Not a black shadow. This is a bright toy factory, and a full shadow term
+	## under thirty candles turns the runway grey.
+	_t.lt(sun.shadow_opacity, 0.8,
+		"shadow_opacity %.2f is dark enough to grey the runway" % sun.shadow_opacity)
+	_t.gt(sun.shadow_opacity, 0.3,
+		"shadow_opacity %.2f is too faint to read as contact" % sun.shadow_opacity)
+	_t.eq(main._stripes.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+		"the lane stripes cast shadows; they lie on the road and produce only acne")
+	_t.eq(main._towers.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+		"the skyline casts shadows; it is below the track and none can be seen")
+
+
+## THE ROAD FADES INTO THE SKY, and does not stop against it.
+##
+## 1200 m of white box under a 420 m far plane ends at a hard edge, which is
+## what made the level read as a paper cut-out.
+##
+## The rule that matters is not "fog is on" but WHERE IT STARTS: fog inside the
+## distance the player reads obstacles at is hiding the game to look pretty, and
+## the strategy guide's one useful sentence is that the player must "start moving
+## well before an obstacle is in reach". So the assertion is stated against the
+## read distance, which is the thing it is really about.
+func _check_the_far_end_fades_into_the_sky(main) -> void:
+	_t.begin("smoke > the far end fades into the sky")
+	var env: WorldEnvironment = null
+	for c in main.get_children():
+		if c is WorldEnvironment:
+			env = c
+			break
+	_t.ok(env != null, "no WorldEnvironment in the scene at all")
+	if env == null:
+		return
+	var e := env.environment
+	_t.ok(e.fog_enabled, "fog is off, so the runway ends at a hard vanishing point")
+	_t.gt(e.fog_depth_begin, 70.0,
+		"fog begins at %.1f m, inside the ~60 m the player reads obstacles at"
+			% e.fog_depth_begin)
+	_t.gt(e.fog_depth_end, e.fog_depth_begin,
+		"fog ends before it begins (%.1f then %.1f)" % [e.fog_depth_end, e.fog_depth_begin])
+	## THE COLOUR IS THE SKY'S HORIZON, not a chosen grey. Anything else puts a
+	## visible band where the road meets the backdrop, which is the same fault
+	## the sky gradient is forbidden from having.
+	var sky_mat: ProceduralSkyMaterial = e.sky.sky_material
+	var fog := e.fog_light_color
+	var hor := sky_mat.sky_horizon_color
+	var apart := maxf(maxf(absf(fog.r - hor.r), absf(fog.g - hor.g)), absf(fog.b - hor.b))
+	_t.lt(apart, 0.02,
+		"fog colour %s does not match the sky horizon %s, so the road meets the sky at a band"
+			% [fog, hor])
 
 
 ## No station gantry may be drawn CLOSE TO THE LENS.

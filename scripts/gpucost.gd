@@ -29,6 +29,13 @@ func _initialize() -> void:
 	## VSYNC OFF, or every measurement is the refresh rate. The first version of
 	## this reported 8.33 ms for both cases - which is 120 Hz, not a shader.
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	## WHAT DO THE SHADOWS COST? Added when the sun first cast one, because
+	## "shadows are cheap enough" is a caution and this repo replaces cautions
+	## with numbers. Same scene, same 240 frames, one boolean apart.
+	if _mode == "noshadow":
+		for c in _main.get_children():
+			if c is DirectionalLight3D:
+				c.shadow_enabled = false
 	if _mode == "plain":
 		## The SAME uniforms, so `_dress_rig` keeps working - swapping in a
 		## StandardMaterial3D made every `set_shader_parameter` fail once a
