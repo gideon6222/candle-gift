@@ -107,6 +107,8 @@ func _run(main) -> void:
 	await _check_the_shop_sells_shops(main)
 	await _check_the_pause_panel(main)
 	_check_every_sound_exists(main)
+	_check_dragging_right_moves_the_batch_right(main)
+	_check_the_black_box(main)
 
 	_finish()
 
@@ -730,3 +732,75 @@ func _finish() -> void:
 	print("")
 	print("  smoke: %d assertions, %d FAILED" % [_t.checks, _t.failures.size()])
 	quit(1)
+
+
+## DRAGGING RIGHT MOVES THE BATCH RIGHT, asserted on the SCREEN.
+##
+## The last game on these notes shipped inverted steering for its whole life,
+## and this one had it too. The reason is always the same: every test drives
+## `steer_to()` in WORLD coordinates, and in world coordinates the sign is
+## correct either way. The camera is behind the batch looking along +z - a
+## 180-degree turn about Y - so world +x is on screen LEFT.
+##
+## So this projects the batch through the actual camera and compares pixels.
+## Nothing about it can be satisfied by a world-space sign that happens to match.
+func _check_dragging_right_moves_the_batch_right(main) -> void:
+	_t.begin("smoke > dragging right moves the batch right")
+	main.freeze()
+	main.advance(2.0, 1.0 / 60.0)
+	var cam: Camera3D = main._cam
+
+	## First the fact the rule rests on, so a camera change that flips the world
+	## fails here rather than silently making the steering wrong again.
+	var at_z: float = main.sim.distance
+	var plus_x: float = cam.unproject_position(Vector3(2.0, 0.5, at_z)).x
+	var minus_x: float = cam.unproject_position(Vector3(-2.0, 0.5, at_z)).x
+	_t.lt(plus_x, minus_x,
+		"world +x is no longer on screen LEFT - the camera changed, and the drag "
+		+ "handler's sign has to change with it")
+
+	var before: float = cam.unproject_position(Vector3(main.sim.x, 0.5, at_z)).x
+	_swipe(main, 180.0)
+	main.advance(0.8, 1.0 / 60.0)
+	var after: float = main._cam.unproject_position(
+		Vector3(main.sim.x, 0.5, main.sim.distance)).x
+	_t.gt(after, before,
+		"dragging RIGHT moved the batch LEFT on screen - the steering is inverted")
+
+	var back: float = main._cam.unproject_position(
+		Vector3(main.sim.x, 0.5, main.sim.distance)).x
+	_swipe(main, -360.0)
+	main.advance(0.8, 1.0 / 60.0)
+	_t.lt(main._cam.unproject_position(Vector3(main.sim.x, 0.5, main.sim.distance)).x, back,
+		"dragging LEFT moved the batch RIGHT on screen")
+
+
+## THE BLACK BOX: a marker at boot, gone on a clean exit, and its tail shown at
+## the next boot if it survived.
+##
+## This is the only diagnostic that reaches back from a phone with no cable, so
+## it is worth more than most features here and gets tested like one.
+func _check_the_black_box(main) -> void:
+	_t.begin("smoke > the black box survives a session that does not end")
+	BlackBox.disarm()
+	_t.eq(BlackBox.crashed_last_time(), false, "the marker is set with no session running")
+
+	BlackBox.arm("test-version")
+	_t.eq(BlackBox.crashed_last_time(), true, "arming did not leave a marker")
+	_t.ok(BlackBox.last_session().contains("test-version"),
+		"the marker does not record which build was running")
+
+	## A CLEAN EXIT CLEARS IT. If this stops working the panel fires on every
+	## launch, everyone learns to tap past it, and the one real crash report is
+	## the one nobody reads.
+	BlackBox.disarm()
+	_t.eq(BlackBox.crashed_last_time(), false, "a clean exit left the marker behind")
+
+	## And the tail is bounded - it goes on a phone screen, not into a terminal.
+	BlackBox.arm("test-version")
+	var tail := BlackBox.tail()
+	_t.lt(float(tail.split("\n").size()), float(BlackBox.TAIL_LINES + 2),
+		"the crash tail is longer than it promises")
+	for line in tail.split("\n"):
+		_t.lt(float(line.length()), 97.0, "a crash tail line is too wide for a phone")
+	BlackBox.disarm()

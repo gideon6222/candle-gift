@@ -41,9 +41,24 @@ const TRAIL_SAMPLES := 4000
 
 # --- one candle -----------------------------------------------------------
 const CORE_RADIUS := 0.30
-const RADIUS_PER_LAYER := 0.045
+## HOW MUCH WIDER EACH COAT IS. Small on purpose.
+##
+## At 0.045 against a 0.30 core, eight coats doubled the candle's radius and the
+## silhouette became a visibly stepped cone - on the phone it read as a stack of
+## plates. A dip adds a skin, not a shelf: 0.012 is a rim you can see at the edge
+## of each band and a silhouette that is still a candle.
+const RADIUS_PER_LAYER := 0.012
 const CANDLE_LENGTH := 1.9     ## across the lane lying down; its height standing
 const BAND_HEIGHT := 0.10
+
+## HOW MUCH SHORTER EACH SUCCESSIVE COAT IS, as a fraction of the candle.
+##
+## A dip covers the candle from the bottom UP TO a height, and each dip after it
+## reaches a little less far - which is what happens when you dip a candle
+## repeatedly and is why a layered candle has rings. At 0.085 the eighth and last
+## coat still reaches 40% of the way up, so every layer the player put on is
+## visible and none is buried.
+const COAT_DROP := 0.085
 const WICK_HEIGHT := 0.30
 const MAX_LAYERS := 8
 const MAX_GLITTER := 3

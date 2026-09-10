@@ -49,6 +49,15 @@ void fragment() {
 	if (ink_width > 0.0) {
 		float face = abs(dot(normalize(NORMAL), normalize(VIEW)));
 		e = smoothstep(ink_width, ink_width * 0.35, face);
+		// A FLAT FACE SEEN EDGE-ON IS NOT A SILHOUETTE.
+		//
+		// The base cap of an upright cylinder points straight down, so from any
+		// camera above the ground it is at grazing incidence everywhere and the
+		// fresnel inks the whole disc - a dark crescent under every candle that
+		// reads as a shadow nobody asked for. A cap is only ever seen edge-on;
+		// fade the line out on surfaces pointing along the world's Y axis.
+		float upright = abs(normalize(NORMAL).y);
+		e *= 1.0 - smoothstep(0.55, 0.92, upright);
 	}
 
 	ALBEDO = mix(base, ink, e);
@@ -67,5 +76,5 @@ void light() {
 	// having no line: a cream candle with no shading and no edge.
 	float d = clamp(dot(normalize(NORMAL), normalize(LIGHT)), 0.0, 1.0);
 	d = floor(d * steps + 0.5) / steps;
-	DIFFUSE_LIGHT += ALBEDO * LIGHT_COLOR * ATTENUATION * (0.10 + 0.42 * d);
+	DIFFUSE_LIGHT += ALBEDO * LIGHT_COLOR * ATTENUATION * (0.14 + 0.44 * d);
 }

@@ -115,17 +115,45 @@ func radii() -> Array[float]:
 	return out
 
 
-func band_height() -> float:
-	return length() / float(layers.size())
-
-
-## Where each band starts along the candle, from one end.
-func band_offsets() -> Array[float]:
-	var h := band_height()
+## HOW FAR UP THE CANDLE EACH COAT REACHES, newest last.
+##
+## A DIP IS A COAT, NOT A STRIPE. Each one covers the candle from the base up to
+## a height, and each successive one reaches a little less far - so the newest
+## wax is the widest and lowest, and every earlier layer stays visible as a ring
+## above it. That is what dipping a candle repeatedly actually does.
+##
+## The old model cut the candle into equal slices and gave each slice its own
+## radius, which built a stepped cone: on the phone it read as "little blocks",
+## which is exactly what it was. It is also not the onion model, which was tried
+## and rejected on the sibling build - concentric shells hide every layer inside
+## the outermost, and five dips render as a plain cylinder.
+func coat_heights() -> Array[float]:
+	## EVENLY SPACED. The oldest coat reaches the top of the candle and the
+	## newest reaches a fraction of the way up, so what you see is n bands of
+	## equal height with the newest at the BOTTOM - which is where the wax
+	## goes when you dip something.
+	##
+	## Spacing them by a fixed drop per layer instead made the newest colour
+	## cover sixty per cent of the candle and squeezed everything else into
+	## rings at the top.
+	var l := length()
+	var n := maxi(1, layers.size())
 	var out: Array[float] = []
-	for i in layers.size():
-		out.append(h * (float(i) + 0.5))
+	for i in n:
+		out.append(l * float(n - i) / float(n))
 	return out
+
+
+## Kept as the thickness of the ring each coat leaves exposed, which is what the
+## renderer needs to know to draw a rim on it.
+func band_height() -> float:
+	return length() / float(maxi(1, layers.size()))
+
+
+## Where each coat's exposed ring sits, measured from the base. The last entry
+## is the top of the newest coat; earlier ones are further up the candle.
+func band_offsets() -> Array[float]:
+	return coat_heights()
 
 
 func length() -> float:

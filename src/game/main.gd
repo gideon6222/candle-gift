@@ -70,6 +70,8 @@ var _wipe_armed := false
 var _resume_phase: int = Phase.HOME
 var _sfx: Sfx
 var _prefs := {}
+var _crash_report := ""
+var _crash: Control
 ## THE BANK, and it deliberately does not live in `Sim`.
 ## `sim.cash` is the notes picked up on the current runway and nothing
 ## else; `restart` zeroes it, and `appraise()` adds it to what the batch
@@ -169,6 +171,16 @@ func _ensure_booted() -> void:
 	if _booted:
 		return
 	_booted = true
+	## READ THE BLACK BOX FIRST, before this session writes anything to the log.
+	_crash_report = ""
+	if BlackBox.crashed_last_time():
+		_crash_report = "LAST SESSION DID NOT EXIT
+%s
+
+%s" % [
+			BlackBox.last_session(), BlackBox.tail()]
+		push_warning("previous session ended without a clean exit")
+	BlackBox.arm(Changelog.VERSION)
 	_state = Save.load_state()
 	_prefs = Settings.load_state()
 	_sfx = Sfx.new()
@@ -271,7 +283,14 @@ func _build_world() -> void:
 
 	# the batch
 	for m in Wax.MOULDS.size():
-		var mm := _mm(_mould_mesh(m), Color.WHITE, BANDS, true)
+		## A NARROW LINE ON THE CANDLES, and it matters more here than anywhere.
+		##
+		## The ink is a fresnel term, so its width is an ANGLE, not a distance.
+		## On a flat-faced prop 0.30 is a clean edge; on a cylinder the normal
+		## sweeps through a half turn, so the same number darkens a wide band
+		## down both sides and the batch reads as rows of dark blocks. That is
+		## what Gideon was looking at.
+		var mm := _mm(_mould_mesh(m), Color.WHITE, BANDS, true, 0.17)
 		_bands.append(mm)
 	_wicks = _mm(_cyl(0.16, 0.16, 1.0, 7), GOLD, Tuning.MAX_CANDLES)
 	_ribbons = _mm(_box(1.0, 1.0, 1.0), PINK, Tuning.MAX_CANDLES, true)
@@ -442,6 +461,17 @@ func _mould_mesh(m: int) -> Mesh:
 		st.add_vertex(Vector3(0, -0.5, 0))
 		st.add_vertex(p1 + Vector3(0, -0.5, 0))
 		st.add_vertex(p0 + Vector3(0, -0.5, 0))
+	## INDEX BEFORE GENERATING NORMALS, and it is the difference between an
+	## outline and a mess.
+	##
+	## `generate_normals()` on unindexed geometry gives every facet a single
+	## flat normal. The ink in `toon.gdshader` is a fresnel term, so with flat
+	## normals it is CONSTANT across each facet - it cannot draw an edge, it
+	## just darkens whole panels of the cylinder, and a standing candle came
+	## out with a black crescent smeared up one side that read as a shadow.
+	## Indexing welds the shared vertices so the normal sweeps smoothly round
+	## the candle, and the same fresnel becomes a line at the silhouette.
+	st.index()
 	st.generate_normals()
 	return st.commit()
 
@@ -690,6 +720,7 @@ func _build_hud() -> void:
 	_build_reward()
 	_build_shop()
 	_build_pause()
+	_build_crash_panel()
 	_show_screens()
 
 
@@ -795,6 +826,63 @@ func _build_home() -> void:
 	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_style(hint, 40)
 	_home.add_child(hint)
+
+
+## THE CRASH REPORT, shown once, at the boot after a session that never ended.
+##
+## It exists because there is no cable. Godot logs every error to a file on the
+## device; if the previous run left its marker behind, the tail of that log is
+## the only account of why it stopped, and a screenshot is the only way it gets
+## off the phone. Selectable text, so it can also be copied.
+func _build_crash_panel() -> void:
+	if _crash_report == "":
+		return
+	_crash = Control.new()
+	_crash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_crash.mouse_filter = Control.MOUSE_FILTER_STOP
+	_crash.draw.connect(func(): _crash.draw_rect(
+		Rect2(Vector2.ZERO, _crash.size), Color(0.09, 0.07, 0.16, 0.98)))
+	_ui.add_child(_crash)
+
+	var title := Label.new()
+	title.text = "THE LAST RUN DID NOT FINISH"
+	title.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	title.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	title.position = Vector2(0, 120)
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_style(title, 46)
+	_crash.add_child(title)
+
+	var hint := Label.new()
+	hint.text = "Screenshot this and send it over."
+	hint.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	hint.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	hint.position = Vector2(0, 190)
+	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_style(hint, 32)
+	_crash.add_child(hint)
+
+	var body := TextEdit.new()
+	body.text = _crash_report
+	body.editable = false
+	body.set_anchors_preset(Control.PRESET_FULL_RECT)
+	body.offset_top = 260
+	body.offset_bottom = -240
+	body.offset_left = 40
+	body.offset_right = -40
+	body.add_theme_font_size_override("font_size", 22)
+	_crash.add_child(body)
+
+	var ok := _button("CARRY ON", 44)
+	ok.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	ok.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	ok.position = Vector2(-200, -180)
+	ok.custom_minimum_size = Vector2(400, 120)
+	ok.pressed.connect(func():
+		_crash.queue_free()
+		_crash = null
+		_crash_report = "")
+	_crash.add_child(ok)
 
 
 ## THE PAUSE PANEL, behind the gear.
@@ -906,6 +994,16 @@ func _on_wipe() -> void:
 		_refresh_pause()
 		return
 	Save.wipe()
+	## READ THE BLACK BOX FIRST, before this session writes anything to the log.
+	_crash_report = ""
+	if BlackBox.crashed_last_time():
+		_crash_report = "LAST SESSION DID NOT EXIT
+%s
+
+%s" % [
+			BlackBox.last_session(), BlackBox.tail()]
+		push_warning("previous session ended without a clean exit")
+	BlackBox.arm(Changelog.VERSION)
 	_state = Save.load_state()
 	_wipe_armed = false
 	_bank = 0.0
@@ -1416,6 +1514,15 @@ func _on_gear_input(event: InputEvent) -> void:
 
 # --- loop -----------------------------------------------------------------
 
+## A clean exit clears the marker. Anything that is not a clean exit - a kill, a
+## driver reset, the OS reclaiming the app - leaves it, and the next boot shows
+## the log.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		Save.store(_state)
+		BlackBox.disarm()
+
+
 func _process(delta: float) -> void:
 	if frozen:
 		return
@@ -1685,22 +1792,33 @@ func _draw_batch() -> void:
 				col = col.lerp(Color.WHITE, 0.10 * float(c.glitter))
 			if c.scent > 0:
 				col = col.lerp(Color(0.847, 0.706, 1.0), 0.16)
+			## A COAT, NOT A STRIPE.
+			##
+			## Each layer is a sleeve from the BASE of the candle up to its own
+			## height, at its own radius - so the newest wax is the widest and
+			## the lowest, and every earlier layer stays visible as a ring above
+			## it. Drawn oldest first, so the newer, wider coats cover the lower
+			## part of the ones under them, which is the order they went on.
+			##
+			## It used to be one slice of the candle's length per layer, each at
+			## a different radius, which builds a stepped cone - "little blocks"
+			## on the phone, and that is exactly what it was.
+			var h := offs[b]
 			var basis: Basis
 			var at: Vector3
 			if t > 0.5:
-				# upright: bands stack in height
-				basis = Basis.IDENTITY.scaled(Vector3(r * 2.0, bh, r * 2.0))
-				at = Vector3(p.x, offs[b], p.y)
+				basis = Basis.IDENTITY.scaled(Vector3(r * 2.0, h, r * 2.0))
+				at = Vector3(p.x, h * 0.5, p.y)
 			else:
-				# lying: the cylinder runs across the lane
+				## Lying down the coat runs across the lane, from the wick end.
 				## `Basis.scaled()` scales the WORLD axes, not the mesh's own, so
-				## the scale vector has to be written in the orientation the band
-				## ENDS UP in rather than the one the cylinder starts in. Rotated
-				## about Z, its axis is world X. Getting that backwards drew the
-				## batch as a heap of overlapping boxes instead of a striped bar,
-				## which looks like a layout bug and is a transform one.
-				basis = Basis(Vector3(0, 0, 1), PI * 0.5).scaled(Vector3(bh, r * 2.0, r * 2.0))
-				at = Vector3(p.x + offs[b] - len * 0.5, radii[0], p.y)
+				## the scale vector is written in the orientation the sleeve ENDS
+				## UP in rather than the one the cylinder starts in. Rotated
+				## about Z its axis is world X; backwards, the batch draws as a
+				## heap of overlapping boxes - a transform bug that looks like a
+				## layout one.
+				basis = Basis(Vector3(0, 0, 1), PI * 0.5).scaled(Vector3(h, r * 2.0, r * 2.0))
+				at = Vector3(p.x - len * 0.5 + h * 0.5, radii[0], p.y)
 			if n < BANDS:
 				mm.set_instance_transform(n, Transform3D(basis, at))
 				mm.set_instance_color(n, col)
@@ -1944,10 +2062,7 @@ func _dress_rig(rig: Node3D, st: Dictionary, sz: float) -> void:
 			inner.material_override = _mat(col)
 			## The stream is a PALE, part-transparent version of the wax, not a rope
 			## of it at full strength: falling wax is thin enough to see through.
-			var stream := _mat(col.lerp(Color.WHITE, 0.42))
-			stream.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			stream.albedo_color.a = 0.78
-			pour.material_override = stream
+			pour.material_override = _stream_mat(col)
 			# HELD, and tipped just enough to spill over the rim. A ladle that is
 			# pouring barely moves; what moves is the wax.
 			head.position.y = 2.55 + sin(beat) * 0.08
@@ -2008,9 +2123,20 @@ func _unhandled_input(event: InputEvent) -> void:
 			_start_run()
 		if _phase != Phase.RUN:
 			return
+		## WORLD +X IS SCREEN LEFT, so the drag SUBTRACTS.
+		##
+		## Measured, not assumed: the camera sits behind the batch looking along
+		## +z, which is a 180-degree turn about Y, and world x=+2 projects to
+		## screen x=182 while x=-2 projects to 898 in a 1080-wide frame.
+		##
+		## Written the obvious way this game shipped with inverted steering, and
+		## so did the last one on these notes - for its entire life - because
+		## every test drove `steer_to()` in WORLD coordinates, where the sign is
+		## correct either way. `dragging right moves the batch right` projects
+		## the batch through the camera and asserts on the SCREEN position.
 		var dx: float = event.relative.x
 		var span := float(get_viewport().get_visible_rect().size.x)
-		sim.steer_to(sim.target_x + dx / span * Tuning.LANE_HALF_WIDTH * 3.4)
+		sim.steer_to(sim.target_x - dx / span * Tuning.LANE_HALF_WIDTH * 3.4)
 
 
 # --- helpers --------------------------------------------------------------
@@ -2028,6 +2154,27 @@ func _wax_material() -> ShaderMaterial:
 ## `ink_width` is where an inverted hull's `grow` used to be: a big prop wants a
 ## narrower band than a candle does, or the whole thing goes dark. Zero turns
 ## the line off, for things like the road stripes that are too thin to carry one.
+## The falling wax: a pale, part-transparent version of the pool's colour.
+##
+## Its own cache rather than `_mat`'s, because it MUTATES what it builds - and
+## `_mat` now hands out shared materials, so mutating one of those would tint
+## every sign and every die in the game the colour of the last pool.
+var _stream_cache := {}
+
+
+func _stream_mat(c: Color) -> StandardMaterial3D:
+	var key := c.to_rgba32()
+	var hit: StandardMaterial3D = _stream_cache.get(key)
+	if hit != null:
+		return hit
+	var m := StandardMaterial3D.new()
+	m.albedo_color = c.lerp(Color.WHITE, 0.42)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color.a = 0.78
+	_stream_cache[key] = m
+	return m
+
+
 func _toon(c: Color, ink_width: float, tinted: bool) -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = load("res://assets/shaders/toon.gdshader")
@@ -2038,9 +2185,29 @@ func _toon(c: Color, ink_width: float, tinted: bool) -> ShaderMaterial:
 	return m
 
 
+## CACHED BY COLOUR, because these are asked for inside the draw loop.
+##
+## `_dress_rig` runs per visible station half per frame and built three fresh
+## `StandardMaterial3D`s each time - about 360 new materials a second, each one a
+## new RID in the rendering server. On this desktop nothing accumulates (object
+## count and video memory are both flat over a 150 s soak), but that is churn a
+## mobile driver has to absorb sixty times a second for no reason at all, and it
+## is the strongest candidate found for a crash that only happens on the phone.
+##
+## There are a handful of distinct colours in the whole game, so the cache is
+## small and never needs evicting. The one rule is that nothing may MUTATE a
+## material it got from here - they are shared now.
+var _mat_cache := {}
+
+
 func _mat(c: Color) -> StandardMaterial3D:
+	var key := c.to_rgba32()
+	var hit: StandardMaterial3D = _mat_cache.get(key)
+	if hit != null:
+		return hit
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
+	_mat_cache[key] = m
 	return m
 
 

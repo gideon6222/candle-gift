@@ -271,6 +271,62 @@ plays the progression: weave every level, bank it, buy whatever is affordable.
 
 Owning everything is worth **3.0x** a fresh install, run for run.
 
+### The phone build, 2026-09-09
+
+**STEERING WAS INVERTED.** World +x is on screen LEFT - measured, x=+2 projects to screen 182
+and x=-2 to 898 in a 1080-wide frame - so the drag handler must subtract, and it added. The
+last game on these notes shipped this bug for its entire life, and the reason is always the
+same: every test drives `steer_to()` in WORLD coordinates, where the sign is right either way.
+`dragging right moves the batch right` projects the batch through the camera with
+`unproject_position` and compares PIXELS.
+
+**A DIP IS A COAT, NOT A STRIPE.** The recipe used to cut the candle into equal slices and give
+each slice its own radius, which builds a stepped cone - "little blocks" on the phone, which is
+exactly what it was. Each layer is now a sleeve from the BASE up to its own height, evenly
+spaced, at a slightly larger radius: the newest wax is widest and lowest, every earlier layer
+stays visible as a ring above it, and the silhouette is a candle. `RADIUS_PER_LAYER` went
+0.045 -> 0.012, because eight coats at the old step doubled the candle's radius.
+
+Not the onion model, which was tried and rejected on the sibling build: concentric full-height
+shells hide every layer inside the outermost, and five dips render as a plain cylinder.
+
+**A FRESNEL RIM NEEDS SMOOTH NORMALS.** `SurfaceTool.generate_normals()` on unindexed geometry
+gives every facet one flat normal, so a fresnel term is CONSTANT across each facet - it cannot
+draw an edge, it darkens whole panels. A standing candle came out with a black crescent smeared
+up one side that read as a shadow, and no amount of tuning `ink_width` fixed it because the
+problem was not the width. `st.index()` before `generate_normals()` welds the shared vertices,
+the normal sweeps smoothly round the candle, and the same shader draws a line.
+
+Also: the ink is suppressed on faces pointing along world Y. A cap is only ever seen edge-on,
+so the fresnel inked the whole disc under every upright candle.
+
+### The crash: not reproduced, surface reduced, and the next one will report itself
+
+Measured on this machine with `scripts/soak.gd` - real frames, real rendering, 150 s across four
+levels:
+
+| | |
+|---|---|
+| crash | none |
+| worst MultiMesh pool | `bands` 153 / 240 |
+| object count | flat, ~2,150 |
+| static memory | flat, ~72 MB |
+| video memory | flat, ~54 MB |
+| wax shader | 0.26 ms of a 1.60 ms frame at 1080x2340, vsync off |
+
+`Candle.dip` caps at `MAX_LAYERS` and every instance write is bounds-checked, so it is not an
+overflow. No device is attached here, so there is no logcat.
+
+**Materials are cached now.** `_dress_rig` built three fresh `StandardMaterial3D`s per visible
+station half per frame - about 360 new RIDs a second. Nothing accumulates on a desktop, but it
+is churn a mobile driver absorbs sixty times a second for no reason, and it is the strongest
+candidate found. `_stream_mat` has its own cache because it MUTATES what it builds, and `_mat`
+now hands out shared materials.
+
+**`blackbox.gd` writes a marker at boot and clears it on a clean exit.** If the marker survives,
+the next launch shows the tail of `user://logs/godot.log` on screen to be screenshotted. With no
+cable, that is the only channel back from the phone.
+
 ### Still to build
 
 The SHOP button says "COMING SOON". The shop sells SHOPS - Online, Scent, Boutique, Luxury -

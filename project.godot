@@ -40,3 +40,14 @@ textures/vram_compression/import_etc2_astc=true
 ; is what lets the tests run with no scene tree. Left at defaults deliberately
 ; rather than tuned, so it is obvious it is unused.
 common/physics_ticks_per_second=60
+
+[debug]
+
+## EVERY ERROR TO A FILE ON THE DEVICE.
+##
+## The phone crashes and there is no cable, so `user://logs/godot.log` is the
+## only evidence that survives. `blackbox.gd` shows its tail at the next boot
+## when the previous session did not exit cleanly.
+file_logging/enable_file_logging=true
+file_logging/enable_file_logging.pc=true
+file_logging/max_log_files=4
