@@ -478,7 +478,7 @@ func _check_value_appears_where_it_is_earned(main) -> void:
 	_t.gt(main.FLOAT_SCREEN_FRAC, 0.02, "floaters are too small to read while steering")
 	_t.lt(main.FLOAT_SCREEN_FRAC, 0.09, "floaters are big enough to cover the runway")
 
-	main._on_cash_taken(1.5, 40.0)
+	main._on_cash_taken(1.5, 40.0, main.sim.note_value())
 	main._on_picked_up(-1.0, 42.0)
 	main._on_hit("barrier", 0.5, 44.0, 3)
 
@@ -492,8 +492,12 @@ func _check_value_appears_where_it_is_earned(main) -> void:
 	## The amount is READ FROM TUNING, not written twice. A note is worth
 	## CASH_VALUE and the player is told CASH_VALUE; a literal here would keep
 	## agreeing with the bank right up until someone rebalanced money.
-	_t.ok(texts.has("+%d $" % Tuning.CASH_VALUE),
-		"no floater said what a note was worth - got %s" % [texts])
+	## READ FROM THE SIMULATION, not from CASH_VALUE. A note is worth the
+	## constant times the level's scale times the earn multiplier, and the first
+	## version of the floater said `+5 $` while the bank received several times
+	## that. `sim.note_value()` is the one place it is worked out.
+	_t.ok(texts.has("+%s $" % SimUtil.fmt(main.sim.note_value())),
+		"no floater said what a note was actually worth - got %s" % [texts])
 	_t.ok(texts.has("+1"), "picking up a candle said nothing - got %s" % [texts])
 	_t.ok(texts.has("-3"), "losing three candles said nothing - got %s" % [texts])
 
@@ -520,6 +524,41 @@ func _check_value_appears_where_it_is_earned(main) -> void:
 		main._on_picked_up(0.0, 50.0 + float(i))
 	_t.eq(main._floaters.size(), main.FLOATERS,
 		"the floater pool grew to %d under a burst" % main._floaters.size())
+
+	## THE TAG, THE FLOATER AND THE BANK ARE ONE NUMBER.
+	##
+	## Three readings of one fact, which is the shape that drifts - and it
+	## drifted the moment it existed twice. A note is worth CASH_VALUE times the
+	## level's scale times the earn multiplier, so a floater built from the
+	## constant told the player `+5 $` while the bank received several times it.
+	## Checked at a LEVEL AND WITH AN UPGRADE where the three differ; at level
+	## one with no shops the scale is 1.0 and every wrong version agrees.
+	main.freeze(6)
+	main.sim.earn_level = 3
+	var note_v: float = main.sim.note_value()
+	_t.gt(note_v, float(Tuning.CASH_VALUE) * 1.5,
+		"the fixture is at a level where a note is still worth CASH_VALUE, so "
+			+ "this cannot tell a correct build from the bug it exists for")
+
+	var cash_before: float = main.sim.cash
+	main.sim.notes.append({"x": main.sim.x, "z": main.sim.distance + 0.2, "taken": false})
+	main.advance(1.0 / 60.0, 1.0 / 60.0)
+	_t.lt(absf((main.sim.cash - cash_before) - note_v), 0.01,
+		"taking a note paid %.2f but note_value() says %.2f"
+			% [main.sim.cash - cash_before, note_v])
+
+	## And the tag lying in the road says the same thing.
+	main.sim.notes.append({"x": main.sim.x, "z": main.sim.distance + 12.0, "taken": false})
+	main.advance(1.0 / 60.0, 1.0 / 60.0)
+	var tagged := 0
+	for t3 in main._note_tags:
+		if t3.visible:
+			tagged += 1
+			_t.eq(t3.text, "%s $" % SimUtil.fmt(note_v),
+				"a price tag reads %s but a note is worth %s"
+					% [t3.text, SimUtil.fmt(note_v)])
+	_t.gt(float(tagged), 0.0, "no price tag was numbered at all")
+	main.freeze(1)
 
 	## AND THE MOMENTS THAT HAD NO PICTURE NOW HAVE ONE.
 	##

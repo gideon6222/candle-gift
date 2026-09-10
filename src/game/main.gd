@@ -152,6 +152,14 @@ const BURSTS := 8
 var _dip_burst: Array[GPUParticles3D] = []
 var _hit_burst: Array[GPUParticles3D] = []
 var _spark_burst: Array[GPUParticles3D] = []
+## THE NUMBER ON A PRICE TAG. Six, because only the nearest few are legible: at
+## twenty metres a tag is a handful of pixels wide and its digits are noise. They
+## are claimed in draw order, which is z order, so they land on the tags the
+## player is about to reach.
+const NOTE_TAGS := 6
+const TAG_READABLE := 26.0
+var _note_tags: Array[Label3D] = []
+
 var _dip_cursor := 0
 var _hit_cursor := 0
 var _spark_cursor := 0
@@ -511,6 +519,26 @@ func _build_floaters() -> void:
 		_floaters.append(l)
 		_float_t.append(0.0)
 		_float_at.append(Vector3.ZERO)
+
+	## The numbers ON the tags lying in the road. Smaller than a floater and
+	## NOT fixed size: this one is part of the scene, lying with the tag it
+	## belongs to, so it should shrink with distance like the tag does.
+	for _i in NOTE_TAGS:
+		var t := Label3D.new()
+		t.font_size = FLOAT_FONT
+		t.pixel_size = 0.0038
+		if _font != null:
+			t.font = _font
+		t.modulate = Color.WHITE
+		t.outline_size = 24
+		t.outline_modulate = Color(0.03, 0.24, 0.10)
+		## Flat on the road, facing up, like the tag. Billboarding it would
+		## stand a number upright in the middle of the track.
+		t.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		t.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
+		t.visible = false
+		add_child(t)
+		_note_tags.append(t)
 
 
 ## Put a number in the world where it was earned or lost.
@@ -2165,12 +2193,16 @@ func _on_picked_up(x: float, z: float) -> void:
 	_float("+1", Vector3(x, 0.0, z), GOLD)
 
 
-func _on_cash_taken(x: float, z: float) -> void:
+func _on_cash_taken(x: float, z: float, amount: float) -> void:
 	_sfx.play(Sfx.CASH)
 	## The reference's own feedback: green, in the world, with the amount and
-	## the dollar. `CASH_VALUE` rather than a literal, so a balance change moves
-	## the number the player reads with the number the bank gets.
-	_float("+%d $" % Tuning.CASH_VALUE, Vector3(x, 0.0, z), NOTE)
+	## the dollar - `+208$`, `+304$`.
+	##
+	## THE AMOUNT COMES FROM THE SIMULATION, not from `CASH_VALUE`. A note is
+	## worth the constant times the level's scale times the earn multiplier, so
+	## the first version of this told the player `+5 $` while the bank received
+	## several times that. `sim.note_value()` is the only place it is worked out.
+	_float("+%s $" % SimUtil.fmt(amount), Vector3(x, 0.0, z), NOTE)
 
 
 func _on_stood_up(_z: float) -> void:
@@ -2597,13 +2629,33 @@ func _draw_pickups() -> void:
 	var mn := _notes.multimesh
 	var mh := _note_holes.multimesh
 	var k := 0
+	## THE TAG SAYS WHAT IT IS WORTH, which is what the reference's do - `5 $`,
+	## `154 $`, `610 $`. Ours were blank tags for four rounds, so the one thing
+	## on the runway that is purely about money said nothing about how much.
+	##
+	## Only the NEAREST few get a number. A tag is a MultiMesh instance and text
+	## is a node, so numbering all of them would be a `Label3D` per note on the
+	## whole runway; at twenty metres the tag is a few pixels wide and the digits
+	## are unreadable anyway. The labels are claimed in draw order, which is
+	## z order, so they land on the tags the player is about to reach.
+	var tag := 0
+	var value := SimUtil.fmt(sim.note_value())
 	for b2 in sim.notes:
 		if bool(b2.taken) or k >= POOL:
 			continue
 		var at2 := Vector3(float(b2.x), 0.14, float(b2.z))
 		mn.set_instance_transform(k, Transform3D(Basis.IDENTITY, at2))
 		mh.set_instance_transform(k, Transform3D(Basis.IDENTITY, at2 + Vector3(-0.42, 0.04, 0)))
+		var ahead := float(b2.z) - sim.distance
+		if tag < NOTE_TAGS and ahead > -2.0 and ahead < TAG_READABLE:
+			var t: Label3D = _note_tags[tag]
+			t.text = "%s $" % value
+			t.position = at2 + Vector3(0.16, 0.10, 0.0)
+			t.visible = true
+			tag += 1
 		k += 1
+	for i in range(tag, NOTE_TAGS):
+		_note_tags[i].visible = false
 	mn.visible_instance_count = k
 	mh.visible_instance_count = k
 

@@ -22,7 +22,11 @@ extends RefCounted
 
 signal dipped(kind: int, x: float, z: float, colour: Color)
 signal picked_up(x: float, z: float)
-signal cash_taken(x: float, z: float)
+## Carries the AMOUNT, not just the place. What a note is worth is
+## `CASH_VALUE` times the level's scale times the earn multiplier, so the
+## renderer cannot work it out from a constant - and when it tried, the game
+## told the player `+5 $` while the bank received several times that.
+signal cash_taken(x: float, z: float, amount: float)
 signal hit_obstacle(kind: String, x: float, z: float, lost: int)
 signal stood_up(z: float)
 signal level_finished(value: float)
@@ -170,6 +174,18 @@ func batch_value() -> float:
 
 func earn_multiplier() -> float:
 	return (1.0 + float(earn_level) * 0.14) * boost_cash
+
+
+## WHAT ONE NOTE ON THIS RUNWAY IS WORTH.
+##
+## The ONE place this is worked out. The price tag lying on the road shows it,
+## the floating text when it is taken shows it, and `cash` receives it - three
+## readings of one fact, which is the shape that drifts. It drifted the moment
+## it existed in two places: the tag said `+5 $` from `CASH_VALUE` while the
+## bank got `CASH_VALUE * scale_for(level) * earn_multiplier()`, so a player on
+## level six with an earning shop was told five and paid many times it.
+func note_value() -> float:
+	return float(Tuning.CASH_VALUE) * Tuning.scale_for(level) * earn_multiplier()
 
 
 ## What the run is worth at the gift table.
@@ -495,8 +511,9 @@ func _update_pickups(dt: float) -> void:
 			continue
 		if absf(bdz) < 1.0 and absf(float(b.x) - x) < mag:
 			b.taken = true
-			cash += float(Tuning.CASH_VALUE) * Tuning.scale_for(level) * earn_multiplier()
-			cash_taken.emit(float(b.x), float(b.z))
+			var paid := note_value()
+			cash += paid
+			cash_taken.emit(float(b.x), float(b.z), paid)
 
 
 ## Entities behind the batch are dropped. Without this the arrays grow for the
