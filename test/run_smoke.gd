@@ -107,6 +107,7 @@ func _run(main) -> void:
 	_check_the_whole_batch_stays_on_screen(main)
 	_check_value_appears_where_it_is_earned(main)
 	_check_the_back_button_unwinds_one_layer(main)
+	_check_the_finished_batch_stands_on_a_podium(main)
 	_check_a_tap_on_a_card_does_not_start_the_run(main)
 	_check_progress_is_saved(main)
 	await _check_the_shop_sells_shops(main)
@@ -665,6 +666,69 @@ func _check_the_back_button_unwinds_one_layer(main) -> void:
 	## all - a test that ran the real quit would end the test process here, and
 	## the one branch that matters most would be the one nobody could check.
 	_t.eq(main._phase, main.Phase.HOME, "deciding to quit changed the phase on the way out")
+	main.freeze(1)
+
+
+## THE FINISHED BATCH STANDS ON A DARK PODIUM.
+##
+## Screenshot 5 of the reference shows it plainly and this game lit the batch in
+## place on the white runway instead, so the moment a run was judged looked
+## exactly like the moment before it - same road, same stripes, a ruler drawn
+## over the top as though the game had paused. Every pale candle the player
+## spent a level building is nearly the colour of the road it stands on.
+##
+## The lift and the dais share `PODIUM_HEIGHT` because they are one fact: a
+## batch that did not rise with the dais would stand inside it. Asserted as the
+## agreement rather than as two heights.
+func _check_the_finished_batch_stands_on_a_podium(main) -> void:
+	_t.begin("smoke > the finished batch stands on a podium")
+
+	main.freeze(1)
+	main.advance(0.5, 1.0 / 60.0)
+	_t.eq(main._podium.visible, false, "the podium is up during a run")
+	_t.lt(main._bands[0].position.y, 0.001, "the batch is lifted during a run")
+
+	## Play the level out so the finish is reached the way a player reaches it,
+	## not by setting the phase by hand - the podium rises off `_phase`, and a
+	## phase set directly would not prove the run leads there.
+	var mem := {}
+	var guard := 0
+	while main._phase == main.Phase.RUN and guard < 4000:
+		Policies.steer(Policies.WEAVE, main.sim, mem)
+		main.advance(1.0 / 60.0, 1.0 / 60.0)
+		guard += 1
+	_t.eq(main._phase, main.Phase.RULER, "playing the level out did not reach the ruler")
+
+	## The rise is EASED, not snapped - the reference never cuts to a results
+	## screen, and the run ends on the same road the presentation happens on.
+	_t.lt(main._present, 0.99, "the batch was on the podium the instant the run ended")
+	main.advance(1.5, 1.0 / 60.0)
+
+	_t.ok(main._podium.visible, "the run finished and no podium came up")
+	_t.lt(absf(main._bands[0].position.y - main.PODIUM_HEIGHT), 0.01,
+		"the batch is %.2f up but the podium is %.2f high, so it stands inside it"
+			% [main._bands[0].position.y, main.PODIUM_HEIGHT])
+	## Every mesh that draws the batch, not just the bands. The one that gets
+	## forgotten is the one nobody looks at - a wick left on the road under a
+	## batch on a dais.
+	for mm in [main._wicks, main._ribbons, main._bows, main._sparks]:
+		_t.lt(absf(mm.position.y - main.PODIUM_HEIGHT), 0.01,
+			"a batch mesh was left at y=%.2f while the rest rose to %.2f"
+				% [mm.position.y, main.PODIUM_HEIGHT])
+
+	## AND THE RUNWAY IS EMPTY. The finish line is not a wall, so obstacles and
+	## pickups spawned near it are still there when the dais rises - and they
+	## rose with it, which put two coral hazards standing on the podium in the
+	## first screenshot of this screen.
+	for mm in [main._barriers, main._posts, main._spikes, main._sweepers,
+			main._sweep_tips, main._bar_marks, main._loose, main._notes]:
+		_t.eq(mm.multimesh.visible_instance_count, 0,
+			"something from the runway is still drawn on the podium")
+
+	## The dais is DARK, which is the whole reason it works: it is the only dark
+	## surface in the game, and the batch reads as a product against it.
+	_t.lt(main.PODIUM.get_luminance(), 0.25,
+		"the podium is not dark, so a pale batch on it has no contrast")
 	main.freeze(1)
 
 

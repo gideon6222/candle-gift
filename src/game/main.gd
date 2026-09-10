@@ -160,6 +160,17 @@ const NOTE_TAGS := 6
 const TAG_READABLE := 26.0
 var _note_tags: Array[Label3D] = []
 
+## THE DAIS the finished batch is judged on, and how far it lifts the batch.
+## One constant, because the podium's height and the height the batch is raised
+## by are the same fact: a batch that did not rise with the dais would stand
+## inside it.
+const PODIUM_HEIGHT := 0.9
+var _podium: MeshInstance3D
+## How far through rising onto the podium the batch is, 0 on the runway and 1
+## standing on it. Eased rather than snapped, because the run ends ON the road
+## and the presentation is the same continuous place - the reference never cuts.
+var _present := 0.0
+
 var _dip_cursor := 0
 var _hit_cursor := 0
 var _spark_cursor := 0
@@ -225,6 +236,9 @@ const CHROME := Color(0.933, 0.953, 0.973)
 ## The ladle: frosted pale ice-blue, not metal.
 const LADLE := Color(0.815, 0.902, 0.957)
 const TOWER := Color(0.875, 0.941, 1.000)
+## The dais the finished batch is presented on. Dark navy, and the only dark
+## surface in the game - see `_build_world`. Read off screenshot 5.
+const PODIUM := Color(0.106, 0.145, 0.310)
 
 
 func _ready() -> void:
@@ -459,6 +473,32 @@ func _build_world() -> void:
 	_tower_tips.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 	_build_floaters()
+
+	## THE PODIUM the finished batch stands on.
+	##
+	## Screenshot 5 of the reference shows it plainly: a dark navy dais with the
+	## wrapped bundles standing on it and the value gauge rising behind. Ours lit
+	## the batch in place on the white runway, so the moment a run is judged
+	## looked exactly like the moment before it - the same road, the same
+	## stripes, and a ruler drawn over the top as though the game had paused.
+	##
+	## Dark on purpose, and it is the only dark surface in the game. Every pale
+	## candle the player spent a level building is nearly the colour of the road
+	## they are standing on; against navy, the batch reads as a PRODUCT on a
+	## stand, which is the whole point of the screen.
+	_podium = MeshInstance3D.new()
+	var dais := CylinderMesh.new()
+	dais.top_radius = 5.2
+	dais.bottom_radius = 5.8
+	dais.height = PODIUM_HEIGHT
+	dais.radial_segments = 40
+	_podium.mesh = dais
+	## No ink line: it is a wide low disc seen from above and slightly to the
+	## side, so a fresnel rim would darken most of its top face - the same trap
+	## the road stripes and the candle caps already record.
+	_podium.material_override = _toon(PODIUM, 0.0, false)
+	_podium.visible = false
+	add_child(_podium)
 
 	for _i in BURSTS:
 		## Wax throws heavy drops that fall back. Glitter is light and hangs.
@@ -2064,6 +2104,12 @@ func _tick(dt: float) -> void:
 		_toast_t -= dt
 		_toast.modulate.a = clampf(_toast_t, 0.0, 1.0)
 	_advance_floaters(dt)
+	## RISING ONTO THE PODIUM. The run ends on the road and the presentation is
+	## the same continuous place - the reference never cuts to a results screen,
+	## and neither does this - so the batch is lifted onto the dais rather than
+	## teleported onto it.
+	var want_present := 1.0 if (_phase == Phase.RULER or _phase == Phase.REWARD) else 0.0
+	_present = move_toward(_present, want_present, dt * 1.6)
 	## Decays fast. A kick that outlasts the moment reads as a camera fault
 	## rather than as an impact - the whole value of it is that it is over
 	## before the player has finished flinching.
@@ -2259,6 +2305,7 @@ func freeze(start_level: int = 1) -> void:
 	_set_phase(Phase.RUN)
 	_interlude = 0.0
 	_stand = 0.0
+	_present = 0.0
 	## Zero means "solve it fresh rather than ease from wherever the last run
 	## left the lens". Without it the first second of a frozen run is framed by
 	## whatever the previous level ended on, so the golden and the contact sheet
@@ -2279,6 +2326,7 @@ func _sync() -> void:
 
 	_draw_stripes(z)
 	_draw_skyline(z)
+	_draw_podium(z)
 	_draw_batch()
 	_draw_pickups()
 	_draw_obstacles()
@@ -2325,7 +2373,12 @@ const FRAME_FAR := 52.0       ## enough for thirty candles plus the stand-up lif
 
 func _draw_camera(z: float) -> void:
 	var up := _stand * 2.2
-	var focus := Vector3(sim.x * 0.35, 1.2, z + 16.0)
+	## The lens only PARTLY follows the batch sideways during play - a camera
+	## that tracked it exactly would make the runway appear to slide instead of
+	## the batch, and the sense of steering would go with it. For the
+	## presentation that trade is over: the dais is the subject, so centre on it.
+	var follow := lerpf(0.35, 1.0, _present)
+	var focus := Vector3(sim.x * follow, 1.2 + PODIUM_HEIGHT * _present, z + 16.0 * (1.0 - _present))
 
 	## SOLVED AGAINST THE WHOLE BATCH AT EVERY STEP, not against one candle
 	## chosen up front.
@@ -2354,6 +2407,13 @@ func _draw_camera(z: float) -> void:
 			else:
 				hi = mid
 		d = hi
+
+	## AND FURTHER BACK WHILE PRESENTING. The framing solve keeps the batch on
+	## screen DOWN the frame; it says nothing about across it, and a long batch
+	## snaking over a dais ran off the left edge. The extra pullback is added
+	## after the solve rather than inside it, so the solve's own guarantee still
+	## holds - more distance can only give more margin, never less.
+	d += _present * 9.0
 
 	## SMOOTHED, AND ASYMMETRICALLY.
 	##
@@ -2411,7 +2471,8 @@ func _worst_frac(z: float, up: float, d: float, focus: Vector3) -> float:
 ## Where the lens sits for a given pullback. Pulling back also lifts, so the
 ## batch is seen along its length rather than end on as it gets longer.
 func _eye(z: float, up: float, d: float) -> Vector3:
-	return Vector3(sim.x * 0.55, 3.9 + (d - FRAME_NEAR) * 0.20 + up, z - d - up * 1.2)
+	return Vector3(sim.x * lerpf(0.55, 1.0, _present),
+		3.9 + (d - FRAME_NEAR) * 0.20 + up, z - d - up * 1.2)
 
 
 ## How far down the frame a world point is drawn through a given camera, 0 top
@@ -2483,6 +2544,33 @@ func _draw_skyline(z: float) -> void:
 			nc += 1
 	mmt.visible_instance_count = nt
 	mmc.visible_instance_count = nc
+
+
+## THE DAIS, and the batch riding up onto it.
+##
+## The batch is drawn by five MultiMeshes and every instance transform in
+## `_draw_batch` is built at ground height. Lifting the NODES rather than the
+## instances is what keeps that arithmetic untouched: an instance transform is
+## local to its `MultiMeshInstance3D`, so moving the node moves everything it
+## draws, and there is exactly one place the lift can be got wrong.
+##
+## `PODIUM_HEIGHT` is used for the dais and for the lift because they are the
+## same fact. A batch that did not rise with the dais would stand inside it.
+func _draw_podium(z: float) -> void:
+	if _present <= 0.001:
+		_podium.visible = false
+	else:
+		_podium.visible = true
+		## Sunk by however far it has risen, so it grows UP out of the road
+		## rather than sliding in from somewhere off screen.
+		_podium.position = Vector3(sim.x, PODIUM_HEIGHT * (_present - 0.5), z)
+	var lift := PODIUM_HEIGHT * _present
+	for mm in _bands:
+		mm.position.y = lift
+	_wicks.position.y = lift
+	_ribbons.position.y = lift
+	_bows.position.y = lift
+	_sparks.position.y = lift
 
 
 ## THE BATCH, in its two forms.
@@ -2608,6 +2696,20 @@ func _draw_batch() -> void:
 
 
 func _draw_pickups() -> void:
+	## THE RUNWAY EMPTIES WHEN THE BATCH IS BEING JUDGED.
+	##
+	## The finish line is not a wall, so obstacles and pickups spawned near it
+	## are still sitting there when the podium rises - and they rise with it,
+	## which put two coral hazards standing on the dais in the first screenshot
+	## of this screen. A results screen shows the product and nothing else.
+	if _present > 0.02:
+		_loose.multimesh.visible_instance_count = 0
+		_loose_tips.multimesh.visible_instance_count = 0
+		_notes.multimesh.visible_instance_count = 0
+		_note_holes.multimesh.visible_instance_count = 0
+		for t in _note_tags:
+			t.visible = false
+		return
 	var mm := _loose.multimesh
 	var mt := _loose_tips.multimesh
 	var n := 0
@@ -2661,6 +2763,11 @@ func _draw_pickups() -> void:
 
 
 func _draw_obstacles() -> void:
+	## Cleared for the presentation, for the reason in `_draw_pickups`.
+	if _present > 0.02:
+		for mm0 in [_barriers, _posts, _spikes, _sweepers, _sweep_tips, _bar_marks]:
+			mm0.multimesh.visible_instance_count = 0
+		return
 	var mb := _barriers.multimesh
 	var ms := _spikes.multimesh
 	var mk := _bar_marks.multimesh
