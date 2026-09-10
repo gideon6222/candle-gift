@@ -129,6 +129,11 @@ const FLOAT_FONT := 96
 ## peripheral vision while steering, and not competing with the runway.
 const FLOAT_SCREEN_FRAC := 0.045
 
+## And how tall the number ON a price tag is. Smaller than a floater: a floater
+## is an event demanding a glance, a tag is a label on a thing you are steering
+## toward. Big enough to read at the ~25 m the decision to go for it is made at.
+const TAG_SCREEN_FRAC := 0.034
+
 ## THE CAMERA'S VERTICAL FIELD OF VIEW, in one place. `_build_world` sets the
 ## camera from this and the floaters derive their size from it, so the two
 ## cannot disagree - which they would the first time the framing was widened.
@@ -520,6 +525,7 @@ func _build_floaters() -> void:
 	## over the frame height at one unit, which is `2 * tan(fov / 2)`. Inverting
 	## that turns the screen fraction above into a `pixel_size`.
 	var px := FLOAT_SCREEN_FRAC * 2.0 * tan(deg_to_rad(CAM_FOV) * 0.5) / float(FLOAT_FONT)
+	var tag_px := TAG_SCREEN_FRAC * 2.0 * tan(deg_to_rad(CAM_FOV) * 0.5) / float(FLOAT_FONT)
 	for _i in FLOATERS:
 		var l := Label3D.new()
 		l.font_size = FLOAT_FONT
@@ -566,16 +572,55 @@ func _build_floaters() -> void:
 	for _i in NOTE_TAGS:
 		var t := Label3D.new()
 		t.font_size = FLOAT_FONT
-		t.pixel_size = 0.0038
+		## FIXED SIZE, for the same reason the floaters are - and this one needs
+		## it more, because a tag is read further away than a floater ever is.
+		##
+		## Sized in world units it was 0.365 units tall, which at the ~24 m a tag
+		## is decided at works out to about 1.4% of frame height, then
+		## foreshortened by the lean to under ten pixels. Measured by printing
+		## the label's text and screen position while it was on screen: it said
+		## `298 $`, it was at 0.54 down the frame, and it was invisible in the
+		## shot. The first guess was that its own barrier occluded it, which was
+		## wrong; it was just too small to see.
+		t.fixed_size = true
+		t.pixel_size = tag_px
 		if _font != null:
 			t.font = _font
 		t.modulate = Color.WHITE
+		## READABLE THROUGH ITS OWN GUARD.
+		##
+		## The barrier is planted a metre IN FRONT of the tag it protects, so
+		## from behind it hides the number exactly. Measured: a `298 $` tag was
+		## drawn, correct, at 0.54 down the frame, and invisible in the shot.
+		##
+		## That is not a cosmetic loss. The whole mechanic is "is that worth
+		## going through a barrier for", and the player cannot answer it without
+		## the number. The tag is a decision the game is asking about, so it
+		## reads like the HUD does rather than like scenery.
+		t.no_depth_test = true
+		t.render_priority = 2
 		t.outline_size = 24
 		t.outline_modulate = Color(0.03, 0.24, 0.10)
-		## Flat on the road, facing up, like the tag. Billboarding it would
-		## stand a number upright in the middle of the track.
+		## LEANING TOWARD THE LENS, not lying flat and not billboarded.
+		##
+		## Flat on the road is what the tag itself does and it is wrong for the
+		## number: the camera looks down the track at about fifteen degrees, so a
+		## label lying flat is seen almost edge-on and squashes to a smear. The
+		## number is the whole decision - whether to go through a barrier for it -
+		## and it has to be readable at the distance the decision is made.
+		##
+		## Billboarding is the other extreme and is worse: it stands a number
+		## bolt upright in the middle of the track, belonging to nothing. A lean
+		## keeps it attached to the tag and still turns it toward the lens.
 		t.billboard = BaseMaterial3D.BILLBOARD_DISABLED
-		t.rotation = Vector3(-PI * 0.5, 0.0, 0.0)
+		## Y = PI so the FACE points back down the track at the lens, the same
+		## flip the station signs need. Without it the number renders mirrored,
+		## which is legible enough to look like a rendering bug rather than
+		## unreadable enough to look like nothing.
+		##
+		## The tilt is positive here because the Y flip reverses which way a
+		## rotation about X leans the label.
+		t.rotation = Vector3(PI * 0.16, PI, 0.0)
 		t.visible = false
 		add_child(t)
 		_note_tags.append(t)
@@ -595,7 +640,15 @@ func _float(text: String, at: Vector3, tint: Color) -> void:
 	l.modulate = tint
 	l.visible = true
 	_float_t[i] = FLOAT_LIFE
-	_float_at[i] = at
+	## STAGGERED, or simultaneous events pile into one another and none of them
+	## can be read. Losing three candles to a barrier standing in a line of
+	## pickups fires three events in the same moment at almost the same place,
+	## and the first build drew "-3+1+1" as one clump of overlapping glyphs.
+	##
+	## Off the pool cursor rather than off the position, so two events at the
+	## SAME spot still separate - which is exactly the case that fails.
+	_float_at[i] = at + Vector3(
+		(float(i % 3) - 1.0) * 0.55, float(i % 2) * 0.75, 0.0)
 
 
 ## Rise and fade. Runs in game time like everything else, so a filmed run and a
@@ -2239,7 +2292,7 @@ func _on_picked_up(x: float, z: float) -> void:
 	_float("+1", Vector3(x, 0.0, z), GOLD)
 
 
-func _on_cash_taken(x: float, z: float, amount: float) -> void:
+func _on_cash_taken(x: float, z: float, amount: float, tier: int) -> void:
 	_sfx.play(Sfx.CASH)
 	## The reference's own feedback: green, in the world, with the amount and
 	## the dollar - `+208$`, `+304$`.
@@ -2249,6 +2302,12 @@ func _on_cash_taken(x: float, z: float, amount: float) -> void:
 	## the first version of this told the player `+5 $` while the bank received
 	## several times that. `sim.note_value()` is the only place it is worked out.
 	_float("+%s $" % SimUtil.fmt(amount), Vector3(x, 0.0, z), NOTE)
+	## A BIG TAG SOUNDS BIGGER. Every note played one identical chime, so the
+	## `610 $` behind a barrier and the `5 $` on open road were the same event
+	## to the ear - and the ear is what the player has spare while steering.
+	if tier > 0:
+		_sfx.play(Sfx.CASH, 1.0 + float(tier) * 0.16)
+		_spark_cursor = _burst(_spark_burst, _spark_cursor, Vector3(x, 0.5, z), NOTE)
 
 
 func _on_stood_up(_z: float) -> void:
@@ -2741,17 +2800,26 @@ func _draw_pickups() -> void:
 	## are unreadable anyway. The labels are claimed in draw order, which is
 	## z order, so they land on the tags the player is about to reach.
 	var tag := 0
-	var value := SimUtil.fmt(sim.note_value())
 	for b2 in sim.notes:
 		if bool(b2.taken) or k >= POOL:
 			continue
 		var at2 := Vector3(float(b2.x), 0.14, float(b2.z))
-		mn.set_instance_transform(k, Transform3D(Basis.IDENTITY, at2))
-		mh.set_instance_transform(k, Transform3D(Basis.IDENTITY, at2 + Vector3(-0.42, 0.04, 0)))
+		## A BIG TAG IS A BIGGER TAG. The denominations have to be readable
+		## BEFORE the digits are - the whole decision is whether to go through a
+		## hazard for it, and that is made at forty metres, where a number is a
+		## smear. Size is the only channel that survives the distance.
+		var grow := 1.0 + float(int(b2.get("tier", 0))) * 0.42
+		var nb := Basis.IDENTITY.scaled(Vector3(grow, 1.0, grow))
+		mn.set_instance_transform(k, Transform3D(nb, at2))
+		mh.set_instance_transform(k, Transform3D(nb,
+			at2 + Vector3(-0.42 * grow, 0.04, 0)))
 		var ahead := float(b2.z) - sim.distance
 		if tag < NOTE_TAGS and ahead > -2.0 and ahead < TAG_READABLE:
+			var tier := int(b2.get("tier", 0))
 			var t: Label3D = _note_tags[tag]
-			t.text = "%s $" % value
+			## EACH TAG SAYS WHAT IT IS WORTH, not what a note is worth. The
+			## denominations are the whole point of them.
+			t.text = "%s $" % SimUtil.fmt(sim.note_value(tier))
 			t.position = at2 + Vector3(0.16, 0.10, 0.0)
 			t.visible = true
 			tag += 1

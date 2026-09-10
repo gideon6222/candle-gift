@@ -559,6 +559,33 @@ func _check_value_appears_where_it_is_earned(main) -> void:
 				"a price tag reads %s but a note is worth %s"
 					% [t3.text, SimUtil.fmt(note_v)])
 	_t.gt(float(tagged), 0.0, "no price tag was numbered at all")
+
+	## AND THE NUMBER IS LEGIBLE, which is the mechanic and not the decoration:
+	## the decision the denominations exist for is "is that worth going through
+	## a barrier for", and it cannot be made without reading the tag.
+	##
+	## Both of these were wrong in the first build and both were found by
+	## printing the label's position and text while it was on screen. It read
+	## `298 $` at 0.54 down the frame and could not be seen at all - sized in
+	## world units it came to under ten pixels at the ~24 m a tag is decided at.
+	## Then, once big enough to see, it was MIRRORED.
+	var tag0: Label3D = main._note_tags[0]
+	_t.ok(tag0.fixed_size,
+		"price tag numbers are sized in world units, so they vanish at the "
+			+ "distance the decision is actually made")
+	## Facing the lens, tied to the station signs rather than to a literal: both
+	## are text in the world that has to be read from behind, and if the
+	## convention ever changes it changes for both.
+	var sign_y := 0.0
+	for rig in main._rigs:
+		for h in rig.get_meta("halves"):
+			sign_y = (h.label as Label3D).rotation.y
+			break
+		break
+	_t.lt(absf(tag0.rotation.y - sign_y), 0.01,
+		"a price tag number is turned %.2f rad and the station signs %.2f - one "
+			% [tag0.rotation.y, sign_y] + "of them is facing away from the camera "
+			+ "and renders mirrored")
 	main.freeze(1)
 
 	## AND THE MOMENTS THAT HAD NO PICTURE NOW HAVE ONE.
