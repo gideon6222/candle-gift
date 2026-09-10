@@ -120,6 +120,19 @@ var _frame_d := 0.0
 ## frame, because notes are spaced further apart than TRAIL_GAP.
 const FLOATERS := 16
 const FLOAT_LIFE := 1.05
+const FLOAT_FONT := 96
+
+## HOW TALL A FLOATER IS ON SCREEN, as a fraction of frame height.
+##
+## The one number to move if they read too big or too small. 0.045 is about the
+## height of the `Level 1` pill, which is the right register: readable in
+## peripheral vision while steering, and not competing with the runway.
+const FLOAT_SCREEN_FRAC := 0.045
+
+## THE CAMERA'S VERTICAL FIELD OF VIEW, in one place. `_build_world` sets the
+## camera from this and the floaters derive their size from it, so the two
+## cannot disagree - which they would the first time the framing was widened.
+const CAM_FOV := 58.0
 var _floaters: Array[Label3D] = []
 var _float_t: Array[float] = []
 var _float_at: Array[Vector3] = []
@@ -374,7 +387,7 @@ func _build_world() -> void:
 	add_child(sun)
 
 	_cam = Camera3D.new()
-	_cam.fov = 58
+	_cam.fov = CAM_FOV
 	_cam.far = 420
 	add_child(_cam)
 
@@ -454,13 +467,32 @@ func _build_world() -> void:
 
 ## The pool of floating value labels. Built once, never grown, never freed.
 func _build_floaters() -> void:
+	## Derived, never typed. With `fixed_size` a `Label3D` is drawn as though it
+	## sat one unit from the lens, so its share of the frame is its world height
+	## over the frame height at one unit, which is `2 * tan(fov / 2)`. Inverting
+	## that turns the screen fraction above into a `pixel_size`.
+	var px := FLOAT_SCREEN_FRAC * 2.0 * tan(deg_to_rad(CAM_FOV) * 0.5) / float(FLOAT_FONT)
 	for _i in FLOATERS:
 		var l := Label3D.new()
-		l.font_size = 96
-		## Bigger than the station signs relative to its distance: a floater is
-		## read for about a second, in the lower half of the frame, while the
-		## player is steering. A sign can be studied; this cannot.
-		l.pixel_size = 0.010
+		l.font_size = FLOAT_FONT
+		## FIXED SIZE, which is the whole point.
+		##
+		## Sized in world units, a floater's height on screen is its distance
+		## from the lens - and it spawns AT THE BATCH, which is the nearest
+		## thing to the camera. Measured: a `+1` came out about three metres
+		## from the lens and its plus sign alone covered a third of the frame,
+		## drawn over everything because these do not depth test. The first
+		## contact sheet with them in is unreadable.
+		##
+		## The distance is not the thing this should depend on. A floater is a
+		## number to be read for about a second while the player is steering
+		## somewhere else, so it wants ONE size, and `fixed_size` renders it at
+		## a constant screen size however far away it is.
+		##
+		## `FLOAT_SCREEN_FRAC` is that size, as a fraction of frame height, and
+		## `pixel_size` is derived from it rather than typed - see the constant.
+		l.fixed_size = true
+		l.pixel_size = px
 		if _font != null:
 			l.font = _font
 		## BILLBOARD_ENABLED, unlike the station signs, which are fixed to their
@@ -472,7 +504,7 @@ func _build_floaters() -> void:
 		## peripheral vision while the player is looking somewhere else.
 		l.no_depth_test = true
 		l.render_priority = 4
-		l.outline_size = 26
+		l.outline_size = 20
 		l.outline_modulate = INK
 		l.visible = false
 		add_child(l)

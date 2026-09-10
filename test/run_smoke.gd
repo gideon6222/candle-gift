@@ -448,6 +448,35 @@ func _check_value_appears_where_it_is_earned(main) -> void:
 		l.visible = false
 	_t.eq(main._floaters.size(), main.FLOATERS, "the floater pool is not the size it says")
 
+	## A FLOATER IS ONE SIZE ON SCREEN, whatever it is standing next to.
+	##
+	## Sized in world units its height on screen is its distance from the lens,
+	## and it spawns AT THE BATCH, which is the nearest thing to the camera. The
+	## first build of this put a `+1` about three metres from the lens whose plus
+	## sign alone covered a third of the frame - drawn over everything, because
+	## floaters do not depth test. The contact sheet was unreadable.
+	##
+	## Distance is not what a number to be read in one second should depend on.
+	var l0: Label3D = main._floaters[0]
+	_t.ok(l0.fixed_size,
+		"floaters are sized in world units, so one next to the camera fills the screen")
+	## And the derived size agrees with the constant it was derived from. The
+	## pixel size is computed from the FOV, so widening the camera without
+	## re-deriving it would quietly change how big every number is.
+	var want_px: float = main.FLOAT_SCREEN_FRAC * 2.0 \
+		* tan(deg_to_rad(main.CAM_FOV) * 0.5) / float(main.FLOAT_FONT)
+	_t.lt(absf(l0.pixel_size - want_px), 1e-6,
+		"the floater size %.6f is not the one FLOAT_SCREEN_FRAC asks for (%.6f)"
+			% [l0.pixel_size, want_px])
+	## CAM_FOV is the camera's, not a second opinion about it.
+	_t.eq(main._cam.fov, main.CAM_FOV,
+		"the camera's fov is %.1f but the floaters are sized for %.1f"
+			% [main._cam.fov, main.CAM_FOV])
+	## And the register is sane: big enough to read in peripheral vision, small
+	## enough not to compete with the runway.
+	_t.gt(main.FLOAT_SCREEN_FRAC, 0.02, "floaters are too small to read while steering")
+	_t.lt(main.FLOAT_SCREEN_FRAC, 0.09, "floaters are big enough to cover the runway")
+
 	main._on_cash_taken(1.5, 40.0)
 	main._on_picked_up(-1.0, 42.0)
 	main._on_hit("barrier", 0.5, 44.0, 3)
