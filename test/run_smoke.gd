@@ -104,6 +104,7 @@ func _run(main) -> void:
 	_check_no_gantry_is_left_behind(main)
 	_check_the_world_casts_shadows(main)
 	_check_the_far_end_fades_into_the_sky(main)
+	_check_the_whole_batch_stays_on_screen(main)
 	_check_a_tap_on_a_card_does_not_start_the_run(main)
 	_check_progress_is_saved(main)
 	await _check_the_shop_sells_shops(main)
@@ -373,6 +374,60 @@ func _check_the_far_end_fades_into_the_sky(main) -> void:
 	_t.lt(apart, 0.02,
 		"fog colour %s does not match the sky horizon %s, so the road meets the sky at a band"
 			% [fog, hor])
+
+
+## THE PLAYER'S OWN BATCH IS NEVER OFF THE BOTTOM OF THE SCREEN.
+##
+## The camera used to sit a hand-tuned distance behind the LEADER, and the batch
+## trails BACKWARD toward the lens, so the longer the batch got the more of it
+## hung off the bottom edge. Measured with `scripts/framing.gd`, worst position
+## of any candle down the frame while weaving, where 1.0 is the bottom edge:
+##
+##   before   level 1  0.98   level 3  1.08   level 6  1.42   level 10  1.37
+##   after    level 1  0.95   level 3  0.95   level 6  0.95   level 10  0.95
+##
+## Nearly half a screen of the player's own batch was below the frame on level
+## six, and it got worse as the game went on because the batch is what grows.
+##
+## Checked at a HIGH LEVEL, because that is where it broke. Level one is close
+## enough to the edge to have hidden this for four rounds: a fixture where the
+## bug barely shows is a fixture that reports the bug as tuning.
+##
+## Stated in fractions of the frame with no viewport in the arithmetic - see
+## `main._frac_of`. A headless viewport is 100x100, so anything that went
+## through `unproject_position` here would be measuring a square screen the
+## phone never shows.
+func _check_the_whole_batch_stays_on_screen(main) -> void:
+	_t.begin("smoke > the whole batch stays on screen")
+	var mem := {}
+	var worst := 0.0
+	var worst_t := 0.0
+	var t := 0.0
+	for level in [1, 10]:
+		main.freeze(level)
+		t = 0.0
+		var span: float = Tuning.level_seconds(level)
+		while t < span:
+			Policies.steer(Policies.WEAVE, main.sim, mem)
+			main.advance(1.0 / 30.0, 1.0 / 60.0)
+			t += 1.0 / 30.0
+			for p in main.sim.positions():
+				var f: float = main._frac_of(main._cam.transform, Vector3(p.x, 0.0, p.y))
+				if f > worst:
+					worst = f
+					worst_t = t
+	## 0.97, against a measured worst of 0.958 and a pre-fix worst of 1.42. Tight
+	## enough that the bug cannot come back without tripping it, loose enough
+	## that the camera's ease-out overshoot is not flaky.
+	_t.lt(worst, 0.97,
+		"a candle was drawn %.3f down the frame at t=%.1fs - the batch is hanging "
+			% [worst, worst_t] + "off the bottom edge (1.0 is the edge)")
+	## And the batch was actually long enough for this to prove something. A
+	## fixture where the batch never grows cannot clip and would pass forever.
+	_t.gt(float(main.sim.count()), 6.0,
+		"the batch only reached %d candles, so this never tested a long one"
+			% main.sim.count())
+	main.freeze(1)
 
 
 ## No station gantry may be drawn CLOSE TO THE LENS.

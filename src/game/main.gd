@@ -98,6 +98,17 @@ var _stand := 0.0
 ## the lens, and its sign fills the bottom of the screen from a metre away.
 var _cam_z := 0.0
 
+## HOW FAR BEHIND THE BATCH THE LENS SITS, smoothed. Solved every frame from the
+## requirement that the whole batch is on screen (see `_draw_camera`), then eased
+## toward, so the camera opens out as the batch grows instead of stepping back a
+## metre the instant a candle is picked up. Zero means "not solved yet", which is
+## the first frame only.
+var _frame_d := 0.0
+
+## The last step handed to `_tick`, so the camera's easing is in game time like
+## everything else. Read only by `_draw_camera`.
+var _last_dt := 1.0 / 60.0
+
 var _dragging := false
 var _booted := false
 ## A RUN IS FOUR PHASES, and every screen in the game is one of them.
@@ -1730,6 +1741,7 @@ func _process(delta: float) -> void:
 
 
 func _tick(dt: float) -> void:
+	_last_dt = dt
 	## HOME and REWARD do not advance the simulation, but they DO still draw:
 	## the world is live behind both of them, which is most of why the reference
 	## reads as one continuous place rather than as a game with menus over it.
@@ -1888,6 +1900,11 @@ func freeze(start_level: int = 1) -> void:
 	_set_phase(Phase.RUN)
 	_interlude = 0.0
 	_stand = 0.0
+	## Zero means "solve it fresh rather than ease from wherever the last run
+	## left the lens". Without it the first second of a frozen run is framed by
+	## whatever the previous level ended on, so the golden and the contact sheet
+	## would depend on what ran before them.
+	_frame_d = 0.0
 	_sync()
 
 
@@ -1918,17 +1935,129 @@ func _sync() -> void:
 ## are only legible from the side: a high camera sees the tops and a
 ## three-colour batch reads as one colour. It lifts a little once the batch is
 ## standing, because a standing rank is taller than a lying loaf.
+## THE CAMERA FOLLOWS THE BACK OF THE BATCH, NOT THE FRONT.
+##
+## It used to sit a hand-tuned distance behind the LEADER: `11.5 + tail * 0.45`,
+## with `tail` clamped at 16 m. A full batch is thirty candles at `TRAIL_GAP`,
+## which is 18 m, so the camera pulled back 18.7 m for something 18 m long and
+## the last candles hung off the bottom of the screen. Measured with
+## `scripts/framing.gd`, worst position of any candle down the frame, weaving:
+##
+##   level 1  0.98      level 3  1.08      level 6  1.42
+##
+## where 1.0 is the bottom edge. Nearly half a screen of the player's own batch
+## was below the frame on level six, and it got worse as the game went on
+## because the batch is what grows.
+##
+## Two tuned constants were being asked to keep one promise between them, which
+## is the shape that never holds: the promise is "the whole batch is on screen",
+## so state THAT and let the camera solve for it.
+##
+## `FRAME_TAIL_AT` is the requirement and the only number to move. The solve is
+## a bisection on the pullback, which is deterministic - the golden and the
+## contact sheet need the same camera on every run - and monotonic, because
+## pulling back and up can only bring the tail higher up the frame. The lower
+## bound is the old 11.5, so a batch of one is framed exactly as it was before
+## and nothing about the first few seconds of a run changes.
+const FRAME_TAIL_AT := 0.90   ## how far down the frame the LAST candle may sit
+const FRAME_NEAR := 11.5      ## pullback for a batch of one - the old constant
+const FRAME_FAR := 52.0       ## enough for thirty candles plus the stand-up lift
+
+
 func _draw_camera(z: float) -> void:
-	var tail := clampf(Trail.back_for(sim.count() - 1), 0.0, 16.0)
 	var up := _stand * 2.2
-	var eye := Vector3(sim.x * 0.55, 3.9 + tail * 0.16 + up,
-		z - 11.5 - tail * 0.45 - up * 1.2)
 	var focus := Vector3(sim.x * 0.35, 1.2, z + 16.0)
+
+	## SOLVED AGAINST THE WHOLE BATCH AT EVERY STEP, not against one candle
+	## chosen up front.
+	##
+	## The first version picked the lowest candle at the near position and then
+	## bisected on that one. It held to level six and broke at level ten (1.07
+	## down the frame, measured): the batch snakes, so WHICH candle is lowest
+	## changes as the lens pulls back, and through a hard weave a candle in the
+	## middle of the batch swings nearer the lens than the last one. Solving for
+	## a candle that is no longer the worst under-pulls by exactly the amount
+	## the real worst is off screen.
+	var d := FRAME_NEAR
+	if _worst_frac(z, up, FRAME_NEAR, focus) > FRAME_TAIL_AT:
+		## Bisection rather than a formula, because `looking_at` re-pitches the
+		## camera as it moves and there is no clean closed form for where a
+		## point lands afterwards. Sixteen halvings of a 40 m range settle to
+		## under a millimetre, and it is all arithmetic - no allocation, no
+		## node, and the same answer on every machine, which the golden and the
+		## contact sheet both depend on.
+		var lo := FRAME_NEAR
+		var hi := FRAME_FAR
+		for _i in 16:
+			var mid := (lo + hi) * 0.5
+			if _worst_frac(z, up, mid, focus) > FRAME_TAIL_AT:
+				lo = mid
+			else:
+				hi = mid
+		d = hi
+
+	## SMOOTHED, AND ASYMMETRICALLY.
+	##
+	## The solve answers a different question every frame as the batch grows and
+	## snakes; taken raw, picking up one candle steps the lens back most of a
+	## metre in a single frame, which reads as a jolt rather than as the batch
+	## getting longer.
+	##
+	## But the two directions are not the same promise. Pulling BACK is the
+	## frame keeping up with a batch that just got longer, and lagging there is
+	## exactly the clipping this whole solve exists to prevent - measured at 1.37
+	## down the frame on level ten with one symmetric rate. Coming back IN is
+	## only comfort, and doing it quickly after an obstacle takes half the batch
+	## snaps the world at the moment the player is already being punished.
+	##
+	## So: out fast, in slow.
+	var rate := 9.0 if d > _frame_d else 1.6
+	_frame_d = lerpf(_frame_d, d, SimUtil.smooth(rate, _last_dt)) if _frame_d > 0.0 else d
+
+	var eye := _eye(z, up, _frame_d)
 	# Transform3D.looking_at, not Node3D.look_at: the node method requires the
 	# node to be in the tree and errors when it is not, which is exactly the
 	# headless case. This is pure maths and works anywhere.
 	_cam.transform = Transform3D(Basis.IDENTITY, eye).looking_at(focus, Vector3.UP)
 	_cam_z = eye.z
+
+
+## The lowest any candle is drawn, for a lens at pullback `d`. This is the
+## quantity `FRAME_TAIL_AT` is a bound on, so it is the thing the solve reads.
+func _worst_frac(z: float, up: float, d: float, focus: Vector3) -> float:
+	var t := Transform3D(Basis.IDENTITY, _eye(z, up, d)).looking_at(focus, Vector3.UP)
+	var worst := -9.0
+	for p in sim.positions():
+		worst = maxf(worst, _frac_of(t, Vector3(p.x, 0.0, p.y)))
+	return worst
+
+
+## Where the lens sits for a given pullback. Pulling back also lifts, so the
+## batch is seen along its length rather than end on as it gets longer.
+func _eye(z: float, up: float, d: float) -> Vector3:
+	return Vector3(sim.x * 0.55, 3.9 + (d - FRAME_NEAR) * 0.20 + up, z - d - up * 1.2)
+
+
+## How far down the frame a world point is drawn through a given camera, 0 top
+## and 1 bottom. No viewport in the arithmetic, deliberately: `unproject_position`
+## divides by the viewport size and a headless one is 100x100, so it answers
+## about a square screen the phone never shows. `keep_aspect` defaults to
+## KEEP_HEIGHT, which makes `fov` the VERTICAL angle, so the vertical framing is
+## the same headless, on the desk and on the phone. `scripts/framing.gd` reports
+## it with the same arithmetic.
+func _frac_of(cam_xform: Transform3D, p: Vector3) -> float:
+	var local := cam_xform.affine_inverse() * p
+	## BEHIND THE LENS STILL HAS TO ORDER, and that is not a detail.
+	##
+	## Returning a flat 9.0 made every candle behind the camera compare EQUAL,
+	## so "the lowest candle" picked whichever was found first - the one nearest
+	## the leader - and the camera then framed a candle several metres in front
+	## of the one actually hanging off the screen. Adding `local.z` (positive
+	## back there, and larger the further back it is) keeps the ordering true
+	## through the whole range, so the solve always frames the real worst case.
+	if local.z > -0.001:
+		return 9.0 + local.z
+	return (1.0 - (local.y / -local.z) / tan(deg_to_rad(_cam.fov) * 0.5)) * 0.5
 
 
 func _draw_stripes(z: float) -> void:
