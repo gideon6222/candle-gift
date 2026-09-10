@@ -9,10 +9,13 @@ timestamps things were read from, and the method for pulling frames out of one. 
 delisted, so that file is the primary source. Five rebuilds of the web version got the
 presentation wrong by inferring instead of looking; do not add a sixth.
 
-**Read `C:\dev\gamedev-notes` first** — `SKILL.md` (process), `PIPELINE.md` (both stacks and
-the measured limits), `CRAFT.md` (design lessons, all of which apply here), `ASSETS.md`,
-`PLAYTESTS.md`. The Godot toolchain paths, the signing rules and the export traps live in
-`C:\dev\godot-template\CLAUDE.md`; this file only carries what is specific to this game.
+@../gamedev-notes/INDEX.md
+
+The shared rules, the Godot traps, the toolchain paths, the export and signing rules and
+the process are in `C:\dev\gamedev-notes` (`INDEX.md` above, then `GODOT.md`, `CRAFT.md`,
+`TESTING.md`, `ASSETS.md`, `POLISH.md`). **This file carries only what is specific to this
+game.** `NOTES.md` has the decisions and measurements; `PLAN.md` the milestones;
+`C:\dev\gamedev-notes\playtests\candle-gift.md` his words about it.
 
 ---
 
@@ -125,23 +128,6 @@ process. The game saves when it loses focus, and "clear my progress" is followed
 exactly that, so without the latch the erased state is written straight back and the button
 appears to do nothing.
 
-## Three Godot traps this build hit, none of which fails loudly
-
-**`Viewport.push_input(event)` does nothing for the GUI unless you pass
-`in_local_coords = true`.** Without it the position is transformed by the viewport's own canvas
-transform and the click lands nowhere - and a click that hits nothing is not an error, so a
-test that drives a button goes green having proved nothing. Measured on a bare `Button` under
-the root: zero presses without it, one with.
-
-**Control layout only resolves during a frame.** A harness that does everything in
-`_initialize()` never runs one, so every `Control` keeps a zero-size rect at the origin.
-`run_smoke.gd` waits three frames before it asserts anything, and asserts the rects are
-non-zero first - otherwise every input-driven check below it is a click into empty space.
-
-**A new `class_name` is invisible until the project is re-imported**, and the failure mode is a
-*hang with no output*, not a parse error you can read. `godot --headless --import` after adding
-one. CI does this already as its first step.
-
 ## Four checks, and each answers a different kind of question
 
 ```bash
@@ -183,9 +169,8 @@ stay fixed.
 
 ## Invariants
 
-- **`src/sim/` may not reference a Node, a Viewport, an input event or a real frame.** That
-  one rule is what makes the whole-run golden possible and what let the renderer be written
-  after the simulation was already tested.
+Shared invariants (pure sim, no `randf()` in state, the hash, `_ensure_booted`, `looking_at`, the flush, freeze-before-advance, anchored HUD, `FLOAT_EPS`, headless MultiMesh colours, `global_transform`, Dictionary Variants, `use_colors`, `Basis.scaled`, `TorusMesh`, culling against the camera) are in `GODOT.md` and are not repeated here.
+
 - **A LEVEL IS TWO SECTIONS, and the ROTATE wall divides them.** Before it the candles lie
   flat and the runway is wax; the wall spans the whole track so it is crossed exactly once;
   after it they stand in a row and the runway is the machines that need them standing. A
@@ -200,27 +185,6 @@ stay fixed.
 - **`Trail.layout` is ONE backward walk for the whole batch.** Calling `sample_back` per
   candle is the obvious way to write it and it is quadratic — the pure suite went from about
   two seconds to over five minutes, which reads as a hang rather than as slow code.
-- **`Basis.scaled()` scales the WORLD axes, not the mesh's own.** A band rotated to lie along
-  world X has to be scaled `(length, radius, radius)`, not `(radius, length, radius)`.
-  Getting it backwards drew the batch as a heap of overlapping boxes — it looks like a layout
-  bug and is a transform one.
-- **`MultiMesh.use_colors` must be set BEFORE `instance_count`.** Godot refuses to toggle it
-  once a buffer exists, and the error is a runtime one that leaves the mesh silently
-  untinted rather than failing the build.
-- **`TorusMesh` has no arc parameter.** A "curved arm" built from one is a complete ring
-  lying flat across the track. The station arms are a post and a leaning boom.
-- **Cull stations against the CAMERA, not the batch.** The camera sits eleven-odd metres
-  back, so a station just behind the batch is still several metres in front of the lens and
-  its sign fills the bottom of the screen.
-- **Nothing that affects game state may use `randf()`.** Place-keyed decisions go through
-  `SimUtil.hash2` seeded on (chunk, level). The one moving obstacle takes its position from
-  `distance` rather than from elapsed time — the same thing at a constant speed, and unlike
-  a clock it is reproducible, so the golden holds.
-- **`_ready` does not run at `add_child()`.** `main.gd` guards this with `_ensure_booted()`.
-- **`visible_instance_count` is the flush**, and it has to be checked in BOTH forms of the
-  batch — the flush that goes missing is the one in the form nobody tested.
-- **Freeze before advancing** in any harness.
-
 ## Numbers that are measured, not chosen
 
 - **`PAR = 10000`**, from the **mean over six levels** with the policies in
@@ -233,8 +197,10 @@ stay fixed.
 - **`CASH_VALUE = 45`.** Money used to be most of what a run was worth, which made the batch
   — the thing the whole game is about building — a rounding error next to green tags.
 
-## Record as you go
+## Shared rules and recording
 
-Write lessons into `gamedev-notes` **in the same commit as the change that taught them**,
-never at the end of a session. Several games run at once; a lesson recorded after this one
-finishes is one the next game never got.
+Everything general lives in `C:\dev\gamedev-notes`: the invariants every game keeps and the
+engine traps in `GODOT.md`, design in `CRAFT.md`, the ship gate in `POLISH.md`. Record a
+lesson the moment it is learned with `/record-lesson` (it writes to the notes' `inbox/`),
+and his words with `/record-lesson playtest candle-gift`. Never edit the notes' topic files from
+a build session.
