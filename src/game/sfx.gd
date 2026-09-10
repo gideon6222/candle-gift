@@ -32,6 +32,15 @@ const STAND := "stand"
 const BUY := "buy"
 const DENY := "deny"
 const FINISH := "finish"
+## Imported, CC0, from Kenney's Interface and Impact packs. A produced sample
+## beats a sine blip for a tap or a knock, and unlike the dip it does not need
+## to change pitch with game state - which is the one thing a fixed sample
+## cannot do and is why the dip ladder stays synthesised.
+const TAP := "tap"
+const CONFIRM := "confirm"
+const DENY_UI := "deny_ui"
+const BACK := "back"
+const KNOCK := "knock"
 
 var enabled := true
 var music_enabled := true
@@ -73,6 +82,15 @@ func build() -> void:
 	## must not sound like a smaller version of success.
 	_streams[DENY] = _make(0.11, 150.0, 0.45, -40.0, 3.0, 0.20)
 	_streams[FINISH] = _make(0.50, 440.0, 0.52, 660.0, 1.0)
+
+	## The imported half. Loaded by name so a missing file is a missing SOUND
+	## rather than a crash - and `the sounds that are imported actually loaded`
+	## in the smoke suite is what turns that into a failure instead of silence.
+	for pair in [[TAP, "tap"], [CONFIRM, "confirm"], [DENY_UI, "deny"],
+			[BACK, "back"], [KNOCK, "knock"]]:
+		var res := load("res://assets/sfx/%s.ogg" % pair[1])
+		if res != null:
+			_streams[pair[0]] = res
 
 	## A MUSIC BED, so the switch that turns music off controls something.
 	##
@@ -125,35 +143,75 @@ func _make(seconds: float, freq: float, gain: float, sweep: float,
 	return w
 
 
-## A slow four-chord loop, built the same way as everything else.
+## AN UPBEAT LOOP, and the last one was genuinely creepy.
 ##
-## Sixteen seconds at 22 kHz is about 700 kB in memory and nothing on disk. The
-## notes are a pentatonic set, so any two that overlap at a loop seam agree.
+## Gideon's words. The old bed was a root, a fifth and an octave held together
+## with a slow swell - which is not a bad synth, it is a drone, and a drone in a
+## minor-leaning set is how you write dread. Three things fix it and none of them
+## is fidelity:
+##
+##   - A MAJOR PROGRESSION with a real cadence: I - V - vi - IV, the four chords
+##     every cheerful pop song is built from.
+##   - MOVEMENT. A bouncing arpeggio at a quaver, so something happens eight
+##     times a bar instead of once every four.
+##   - A PULSE. A soft kick on the beat. A loop with no rhythm floats; the thing
+##     that makes music feel happy rather than ambient is that it has a tempo you
+##     can nod to.
+##
+## 120 BPM, sixteen bars of two seconds, thirty-two seconds. Still generated
+## rather than imported, because there is nothing to import: Kenney's audio packs
+## are the CC0 library this project uses and they have jingles, not loops.
 func _make_bed() -> AudioStreamWAV:
-	const BARS := 4
-	const BAR := 4.0
-	var roots: Array[float] = [220.0, 261.63, 196.0, 293.66]
-	var n := int(RATE * BAR * float(BARS))
+	const BPM := 120.0
+	const BEAT := 60.0 / BPM
+	const BARS := 16
+	var bar_seconds := BEAT * 4.0
+
+	## I - V - vi - IV in C, as semitone offsets from the root of each chord, and
+	## the arpeggio walks root-third-fifth-octave up and back down.
+	var roots: Array[float] = [261.63, 392.00, 440.00, 349.23]   # C, G, A, F
+	var steps: Array[float] = [1.0, 1.25, 1.5, 2.0, 1.5, 1.25]   # major triad, up and down
+
+	var n := int(RATE * bar_seconds * float(BARS))
 	var data := PackedByteArray()
 	data.resize(n * 2)
-	var phases: Array[float] = [0.0, 0.0, 0.0]
-	const MULTS: Array[float] = [1.0, 1.5, 2.0]
-	const GAINS: Array[float] = [0.5, 0.3, 0.2]
+	var arp_phase := 0.0
+	var bass_phase := 0.0
+	var pad_phase := 0.0
+
 	for i in n:
 		var t := float(i) / float(RATE)
-		var bar := int(t / BAR) % BARS
+		var bar := int(t / bar_seconds) % 4
 		var root: float = roots[bar]
-		var v := 0.0
-		## Root, fifth, octave. Three sines is a chord; a sawtooth here would
-		## fight the blips, which are the only thing the player needs to hear.
-		for k in 3:
-			phases[k] += TAU * root * MULTS[k] / float(RATE)
-			v += sin(phases[k]) * GAINS[k]
-		## Breathe, so it does not sit flat under the game.
-		var swell := 0.55 + 0.45 * sin(TAU * (t / (BAR * 2.0)))
-		## And fade the very ends into each other, or the loop clicks.
-		var edge := minf(1.0, minf(t, float(n) / float(RATE) - t) / 0.4)
-		data.encode_s16(i * 2, int(clampf(v * swell * edge * 0.6, -1.0, 1.0) * 32767.0))
+		var in_bar := fposmod(t, bar_seconds)
+
+		## The arpeggio: a new note every quaver, each one plucked.
+		var eighth := BEAT * 0.5
+		var step_i := int(in_bar / eighth) % steps.size()
+		var into := fposmod(in_bar, eighth) / eighth
+		arp_phase += TAU * root * 2.0 * steps[step_i] / float(RATE)
+		## A short percussive envelope per note is what makes it bounce; held, the
+		## same notes are a drone again.
+		var pluck := pow(1.0 - into, 2.2)
+		var arp := sin(arp_phase) * pluck * 0.34
+
+		## The bass: the chord root, an octave down, held for the bar.
+		bass_phase += TAU * root * 0.5 / float(RATE)
+		var bass := sin(bass_phase) * 0.30
+
+		## A pad underneath, quiet, for warmth.
+		pad_phase += TAU * root * 1.5 / float(RATE)
+		var pad := sin(pad_phase) * 0.10
+
+		## The kick, on every beat. A sine sweeping down fast is a kick drum.
+		var into_beat := fposmod(t, BEAT) / BEAT
+		var kick := sin(TAU * (52.0 + 60.0 * pow(1.0 - into_beat, 3.0)) * t)
+		kick *= pow(1.0 - into_beat, 7.0) * 0.42
+
+		var v := arp + bass + pad + kick
+		## Fade the very ends into each other, or the loop clicks.
+		var edge := minf(1.0, minf(t, float(n) / float(RATE) - t) / 0.25)
+		data.encode_s16(i * 2, int(clampf(v * edge * 0.62, -1.0, 1.0) * 32767.0))
 
 	var w := AudioStreamWAV.new()
 	w.format = AudioStreamWAV.FORMAT_16_BITS
@@ -183,7 +241,10 @@ func set_music(on: bool) -> void:
 func play(name: String, pitch: float = 1.0) -> void:
 	if not enabled:
 		return
-	var stream: AudioStreamWAV = _streams.get(name)
+	## `AudioStream`, not `AudioStreamWAV`: half of these are imported .ogg
+	## now, and typing this to the synthesised class silently refused to
+	## play every one of them.
+	var stream: AudioStream = _streams.get(name)
 	if stream == null:
 		return
 	## ROUND-ROBIN, and it is why there are eight of them. A single player

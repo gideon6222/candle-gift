@@ -336,6 +336,97 @@ func _rail(side: int) -> MeshInstance3D:
 ## the candles that come out of it are built from the same two numbers and
 ## cannot disagree. A press that stamps an invisible shape is a multiplier with
 ## a gantry over it.
+## SPATTER, from a Kenney sprite.
+##
+## The one thing that says "this is landing on something". A soft round particle
+## (CC0, Kenney's particle pack) thrown up from the impact point and pulled back
+## down, tinted the colour of the pool.
+##
+## `GPUParticles3D` rather than another MultiMesh: the motion is the whole point
+## and the GPU already knows how to integrate it. One emitter per station half,
+## built with the rig and re-tinted in `_dress_rig`, so nothing is allocated
+## while the game is running.
+func _make_splash() -> GPUParticles3D:
+	var g := GPUParticles3D.new()
+	g.amount = 18
+	g.lifetime = 0.85
+	g.explosiveness = 0.0
+	g.randomness = 0.7
+	g.local_coords = false
+
+	var m := ParticleProcessMaterial.new()
+	m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	m.emission_sphere_radius = 0.16
+	m.direction = Vector3(0, 1, 0)
+	m.spread = 42.0
+	m.initial_velocity_min = 1.1
+	m.initial_velocity_max = 2.3
+	m.gravity = Vector3(0, -6.5, 0)
+	m.scale_min = 0.5
+	m.scale_max = 1.0
+	## Shrinking as they go, so they read as drops rejoining the pool rather
+	## than as sprites switching off.
+	var curve := Curve.new()
+	curve.add_point(Vector2(0.0, 1.0))
+	curve.add_point(Vector2(1.0, 0.0))
+	var tex := CurveTexture.new()
+	tex.curve = curve
+	m.scale_curve = tex
+	g.process_material = m
+
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.20, 0.20)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = load("res://assets/particles/droplet.png")
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	## Billboarded quads must not write depth, or each one punches a hole in the
+	## ones behind it and the spatter flickers as they sort.
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat.vertex_color_use_as_albedo = true
+	quad.material = mat
+	g.draw_pass_1 = quad
+	return g
+
+
+## THE POUR: a tapering, slightly kinked column.
+##
+## Ten short segments from a fat lip to a thin tail, each one a ring of the
+## previous one's radius shrunk a little and nudged sideways. The kink is fixed
+## in the mesh rather than animated - the whole stream swings with the ladle
+## every frame, and a stream that also writhed would read as a rope rather than
+## as falling liquid.
+func _stream_mesh() -> Mesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	const SEGS := 10
+	const SIDES := 7
+	var drop := 2.35
+	var prev := PackedVector3Array()
+	for seg in SEGS + 1:
+		var f := float(seg) / float(SEGS)
+		## Fat at the lip, thin at the tail, and thinning FASTER at the end -
+		## which is what stretching under gravity does.
+		var r: float = lerpf(0.085, 0.022, pow(f, 0.65))
+		var y := -drop * f
+		## A gentle lean, so it is not a plumb line.
+		var x := sin(f * 2.1) * 0.055
+		var ring := PackedVector3Array()
+		for k in SIDES:
+			var a := TAU * float(k) / float(SIDES)
+			ring.append(Vector3(x + cos(a) * r, y, sin(a) * r))
+		if seg > 0:
+			for k in SIDES:
+				var k1 := (k + 1) % SIDES
+				st.add_vertex(prev[k]); st.add_vertex(ring[k]); st.add_vertex(ring[k1])
+				st.add_vertex(prev[k]); st.add_vertex(ring[k1]); st.add_vertex(prev[k1])
+		prev = ring
+	st.index()
+	st.generate_normals()
+	return st.commit()
+
+
 ## A CONE, wound to match the cap in `_mould_mesh`.
 ##
 ## Winding is copied from geometry that is known to render right rather than
@@ -607,16 +698,28 @@ func _make_rig() -> Node3D:
 		inner.material_override = _mat(Color.WHITE)
 		inner.position.y = 0.14
 		head.add_child(inner)
-		## THIN, PALE AND NEARLY VERTICAL, which is what the reference's stream
-		## is. At 0.17-0.26 across and 2.6 long, hanging off a ladle tipped 0.62
-		## rad, it swung out across the whole track and read as a gold baguette
-		## lying over the runway - the single most conspicuous wrong thing in a
-		## frame. Wax leaving a lip falls; it does not point where the lip points.
+		## A FALLING STREAM, not a cylinder.
+		##
+		## It was a plain cylinder, and Gideon's word for it was "cylinders". Three
+		## things separate a pour from a pipe, and none of them is resolution:
+		##
+		##   - it TAPERS. Wax leaves the lip as a lump and stretches as it falls,
+		##     so the top is fat and the bottom is thin.
+		##   - it is not straight. A real stream wanders a little, so the mesh is
+		##     built as a stack of short segments that can be offset per frame.
+		##   - it SPLASHES. Something has to happen where it lands.
+		##
+		## Built as its own mesh rather than scaled from a primitive, because a
+		## taper is a property of the geometry and a scale cannot express one.
 		var pour := MeshInstance3D.new()
-		pour.mesh = _cyl(0.055, 0.085, 2.3, 8)
+		pour.mesh = _stream_mesh()
 		pour.material_override = _mat(Color.WHITE)
-		pour.position = Vector3(0.46, -1.28, 0.0)
+		pour.position = Vector3(0.46, -0.14, 0.0)
 		head.add_child(pour)
+
+		var splash := _make_splash()
+		splash.emitting = false
+		h.add_child(splash)
 
 		var gift := MeshInstance3D.new()
 		gift.mesh = _box(1.6, 1.5, 1.6)
@@ -646,6 +749,7 @@ func _make_rig() -> Node3D:
 			"wall": wall, "liquid": liquid,
 			"head": head, "bowl": bowl, "inner": inner, "pour": pour,
 			"gift": gift, "dies": dies, "plate": plate, "side": side,
+			"splash": splash,
 		})
 	g.visible = false
 	g.set_meta("halves", halves)
@@ -956,6 +1060,7 @@ func _open_pause() -> void:
 
 
 func _close_pause() -> void:
+	_sfx.play(Sfx.BACK)
 	_wipe_armed = false
 	_set_phase(_resume_phase)
 
@@ -974,7 +1079,7 @@ func _toggle_sound() -> void:
 	## Disarmed by anything else on the panel, so the second tap has to be a
 	## deliberate second tap rather than the next thing the thumb happens to do.
 	_wipe_armed = false
-	_sfx.play(Sfx.BUY)
+	_sfx.play(Sfx.TAP)
 	_refresh_pause()
 
 
@@ -983,7 +1088,7 @@ func _toggle_music() -> void:
 	_sfx.set_music(bool(_prefs.music))
 	Settings.store(_prefs)
 	_wipe_armed = false
-	_sfx.play(Sfx.BUY)
+	_sfx.play(Sfx.TAP)
 	_refresh_pause()
 
 
@@ -1194,7 +1299,7 @@ func _on_shop_drag(event: InputEvent) -> void:
 func _on_buy(id: String) -> void:
 	var owned: Array = _state.get("owned", [])
 	if not Shops.can_buy(owned, _bank, id):
-		_sfx.play(Sfx.DENY)
+		_sfx.play(Sfx.DENY_UI)
 		return
 	var entry := Shops.by_id(id)
 	_bank -= float(entry.price)
@@ -1207,13 +1312,14 @@ func _on_buy(id: String) -> void:
 	for k in stats:
 		_state[k] = stats[k]
 	Save.store(_state)
-	_sfx.play(Sfx.BUY)
+	_sfx.play(Sfx.CONFIRM)
 	_apply_save_to_sim()
 	_refresh_shop()
 	_sync()
 
 
 func _close_shop() -> void:
+	_sfx.play(Sfx.BACK)
 	_set_phase(Phase.HOME)
 
 
@@ -1322,11 +1428,11 @@ BONUS x1.5
 
 func _on_boost_candles() -> void:
 	if _bank < BOOST_PRICE or sim.boost_candles > 0:
-		_sfx.play(Sfx.DENY)
+		_sfx.play(Sfx.DENY_UI)
 		return
 	_bank -= BOOST_PRICE
 	sim.boost_candles += 1
-	_sfx.play(Sfx.BUY)
+	_sfx.play(Sfx.CONFIRM)
 	_state.cash = _bank
 	Save.store(_state)
 	## The boost changes what the batch STARTS as, so the level has to be laid
@@ -1345,11 +1451,11 @@ func _on_boost_candles() -> void:
 
 func _on_boost_cash() -> void:
 	if _bank < BOOST_PRICE or sim.boost_cash > 1.0:
-		_sfx.play(Sfx.DENY)
+		_sfx.play(Sfx.DENY_UI)
 		return
 	_bank -= BOOST_PRICE
 	sim.boost_cash = 1.5
-	_sfx.play(Sfx.BUY)
+	_sfx.play(Sfx.CONFIRM)
 	_state.cash = _bank
 	Save.store(_state)
 	_refresh_boosts()
@@ -1357,6 +1463,7 @@ func _on_boost_cash() -> void:
 
 
 func _on_shop() -> void:
+	_sfx.play(Sfx.TAP)
 	_set_phase(Phase.SHOP)
 
 
@@ -1630,7 +1737,7 @@ func _on_stood_up(_z: float) -> void:
 
 func _on_hit(_kind: String, _x: float, _z: float, n: int) -> void:
 	if n > 0:
-		_sfx.play(Sfx.HIT)
+		_sfx.play(Sfx.KNOCK)
 		_say("-%d" % n)
 
 
@@ -2051,6 +2158,8 @@ func _dress_rig(rig: Node3D, st: Dictionary, sz: float) -> void:
 		var dies: Array = h.dies
 
 		bowl.visible = machine == "ladle" or machine == "bottle"
+		var splash_off: GPUParticles3D = h.splash
+		splash_off.emitting = bowl.visible
 		inner.visible = bowl.visible
 		pour.visible = bowl.visible
 		gift.visible = machine == "gift"
@@ -2063,6 +2172,17 @@ func _dress_rig(rig: Node3D, st: Dictionary, sz: float) -> void:
 			## The stream is a PALE, part-transparent version of the wax, not a rope
 			## of it at full strength: falling wax is thin enough to see through.
 			pour.material_override = _stream_mat(col)
+			var splash: GPUParticles3D = h.splash
+			## Where the stream actually lands: under the lip, on the pool.
+			splash.position = Vector3(head.position.x + 0.46, 0.10,
+				head.position.z - 2.35)
+			## `GPUParticles3D` has no `modulate` - the tint belongs to the material
+			## on its draw pass, and each emitter was built with its own so this
+			## cannot colour another station's spatter.
+			var spray: QuadMesh = splash.draw_pass_1
+			var spray_mat: StandardMaterial3D = spray.material
+			spray_mat.albedo_color = col.lerp(Color.WHITE, 0.35)
+			splash.emitting = true
 			# HELD, and tipped just enough to spill over the rim. A ladle that is
 			# pouring barely moves; what moves is the wax.
 			head.position.y = 2.55 + sin(beat) * 0.08
@@ -2071,7 +2191,7 @@ func _dress_rig(rig: Node3D, st: Dictionary, sz: float) -> void:
 			## straight down. It is a child of the head so that it stays on the
 			## LIP as the ladle rocks, which is right - but inheriting the tilt as
 			## well pointed it sideways, and wax does not do that.
-			pour.rotation = Vector3(0, 0, -head.rotation.z + 0.06)
+			pour.rotation = Vector3(0, 0, -head.rotation.z + 0.06 + sin(beat * 2.7) * 0.035)
 		elif machine == "ram":
 			dies[int(half.mould)].visible = true
 			var drop := pow(maxf(0.0, sin(beat * 1.7)), 0.55)
@@ -2146,6 +2266,8 @@ func _unhandled_input(event: InputEvent) -> void:
 func _wax_material() -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = load("res://assets/shaders/wax.gdshader")
+	## Shared by every pool - one texture, six materials.
+	m.set_shader_parameter("swirl", load("res://assets/tex/wax_swirl.png"))
 	return m
 
 

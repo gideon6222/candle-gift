@@ -107,6 +107,7 @@ func _run(main) -> void:
 	await _check_the_shop_sells_shops(main)
 	await _check_the_pause_panel(main)
 	_check_every_sound_exists(main)
+	_check_the_imported_sounds_loaded(main)
 	_check_dragging_right_moves_the_batch_right(main)
 	_check_the_black_box(main)
 
@@ -804,3 +805,23 @@ func _check_the_black_box(main) -> void:
 	for line in tail.split("\n"):
 		_t.lt(float(line.length()), 97.0, "a crash tail line is too wide for a phone")
 	BlackBox.disarm()
+
+
+## THE IMPORTED SOUNDS ACTUALLY LOADED.
+##
+## They are loaded by name from `res://assets/sfx/`, so a rename, a bad path or
+## a file that never made it into the export is SILENCE - and silence is not an
+## error. That is the exact failure mode the synthesised set was chosen to avoid,
+## so importing any at all means asserting they arrived.
+func _check_the_imported_sounds_loaded(main) -> void:
+	_t.begin("smoke > the imported sounds are there")
+	var built: Array = main._sfx.names()
+	for name in [Sfx.TAP, Sfx.CONFIRM, Sfx.DENY_UI, Sfx.BACK, Sfx.KNOCK]:
+		_t.ok(built.has(name), "the imported sound '%s' did not load" % name)
+
+	## And the music is a LOOP. A bed that plays once and stops is a bug nobody
+	## notices for a week, because it sounds fine for the first thirty seconds.
+	var bed: AudioStreamWAV = main._sfx._music.stream
+	_t.ok(bed != null, "there is no music bed")
+	_t.eq(bed.loop_mode, AudioStreamWAV.LOOP_FORWARD, "the music does not loop")
+	_t.gt(float(bed.data.size()), 0.0, "the music bed has no samples in it")
