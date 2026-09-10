@@ -292,7 +292,12 @@ Still open, in rough order of how much they would move the resemblance:
 2. **The finished batch is not shown on a dark podium.** We light it in place on the runway.
    Screenshot 5 shows the podium clearly: **dark navy**, with the wrapped bundles standing on
    it and the value gauge rising behind.
-3. **Price tags carry no number.** Theirs read `5 $`, `154 $`; ours are a blank tag.
+3. ~~**Price tags carry no number.** Theirs read `5 $`, `154 $`; ours are a blank tag.~~
+   Closed 2026-09-10, and it turned out to be a mechanic rather than a label. The three
+   observed values are three DENOMINATIONS, not one tag at three levels: `5 $` reads at
+   level one, and `154 $` / `610 $` are the same tag times six and times twenty-four, which
+   is what they come to around level ten. Every tag above the smallest is planted behind a
+   barrier of its own, so money is a decision rather than something driven over.
 4. **We have not seen their upgrade screen at all**, so ours is ours.
 
 ## Still unknown

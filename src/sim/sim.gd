@@ -26,7 +26,7 @@ signal picked_up(x: float, z: float)
 ## `CASH_VALUE` times the level's scale times the earn multiplier, so the
 ## renderer cannot work it out from a constant - and when it tried, the game
 ## told the player `+5 $` while the bank received several times that.
-signal cash_taken(x: float, z: float, amount: float)
+signal cash_taken(x: float, z: float, amount: float, tier: int)
 signal hit_obstacle(kind: String, x: float, z: float, lost: int)
 signal stood_up(z: float)
 signal level_finished(value: float)
@@ -184,8 +184,9 @@ func earn_multiplier() -> float:
 ## it existed in two places: the tag said `+5 $` from `CASH_VALUE` while the
 ## bank got `CASH_VALUE * scale_for(level) * earn_multiplier()`, so a player on
 ## level six with an earning shop was told five and paid many times it.
-func note_value() -> float:
-	return float(Tuning.CASH_VALUE) * Tuning.scale_for(level) * earn_multiplier()
+func note_value(tier: int = 0) -> float:
+	var mult: float = Tuning.CASH_TIERS[clampi(tier, 0, Tuning.CASH_TIERS.size() - 1)]
+	return float(Tuning.CASH_VALUE) * mult * Tuning.scale_for(level) * earn_multiplier()
 
 
 ## What the run is worth at the gift table.
@@ -281,14 +282,38 @@ func _spawn_chunk(c: int) -> void:
 	# spot, and it is what turns steering from "avoid things" into a decision.
 	var has_cash := SimUtil.hash2(c, 913 + level) < Tuning.CASH_CHANCE
 	var cash_x := Tuning.lane_x(SimUtil.hash2(c, 905 + level))
-	var guarded := has_cash and SimUtil.hash2(c, 907 + level) < Tuning.GUARDED_CASH
+	## THE TAG DECIDES ITS OWN GUARD, rather than hoping one turns up.
+	##
+	## This was the other way round first - `guarded` was an intent flag rolled
+	## before the obstacles, and the tier read it. But the barrier has its own
+	## independent chance and does not spawn at all before chunk five, so a note
+	## could be marked guarded and lie in open road: big tags on empty track,
+	## caught by `test_every_big_tag_is_behind_a_hazard`. Making the tier depend
+	## on a barrier that actually appeared then made big tags almost never
+	## appear, because it needed three rolls to agree.
+	##
+	## Both failures are the same mistake, which is letting the rule be an
+	## accident of two independent decisions. The rule - a big tag is never free
+	## - is now true BY CONSTRUCTION: the tier is rolled first and a tier above
+	## the smallest plants its own barrier on the cash line whatever the ordinary
+	## barrier roll says.
+	var tier := 0
+	if has_cash:
+		var roll := SimUtil.hash2(c, 921 + level)
+		if roll < Tuning.TIER2_CHANCE:
+			tier = 2
+		elif roll < Tuning.TIER2_CHANCE + Tuning.TIER1_CHANCE:
+			tier = 1
+	var guarded := has_cash and (tier > 0
+		or SimUtil.hash2(c, 907 + level) < Tuning.GUARDED_CASH)
 
-	if c >= 5 and SimUtil.hash2(c, 91 + level) < Tuning.BARRIER_CHANCE * dens:
+	if tier > 0 or (c >= 5 and SimUtil.hash2(c, 91 + level) < Tuning.BARRIER_CHANCE * dens):
 		var bn := 1 + int(SimUtil.hash2(c, 120 + level) * 2.2)
 		for i in bn:
+			var on_cash := i == 0 and guarded
 			obstacles.append({
 				"kind": "barrier",
-				"x": cash_x if (i == 0 and guarded) else Tuning.lane_x(SimUtil.hash2(c, 300 + i)),
+				"x": cash_x if on_cash else Tuning.lane_x(SimUtil.hash2(c, 300 + i)),
 				"z": z + 2.0 + float(i) * 3.6,
 				"w": 0.95, "hit": false, "side": 0, "reach": 0.0, "phase": 0.0, "dir": 1,
 			})
@@ -339,9 +364,18 @@ func _spawn_chunk(c: int) -> void:
 			})
 
 	if has_cash:
-		var cn := 1 + int(SimUtil.hash2(c, 900) * 2.0)
+		## THE TIER IS DECIDED BY THE GUARD, which is what makes money a
+		## decision rather than something driven over. A tag on open road is
+		## always the small one; every large tag is behind a hazard.
+		## A big tag is ONE tag. A line of three `610 $` notes behind one
+		## barrier is not a harder decision than one, it is the same decision
+		## paying three times.
+		var cn := 1 if tier > 0 else 1 + int(SimUtil.hash2(c, 900) * 2.0)
 		for i in cn:
-			notes.append({"x": cash_x, "z": z + 3.0 + float(i) * 4.5, "taken": false})
+			notes.append({
+				"x": cash_x, "z": z + 3.0 + float(i) * 4.5,
+				"taken": false, "tier": tier,
+			})
 
 
 func _spawn_station(c: int, z: float, slot: Dictionary) -> void:
@@ -511,9 +545,9 @@ func _update_pickups(dt: float) -> void:
 			continue
 		if absf(bdz) < 1.0 and absf(float(b.x) - x) < mag:
 			b.taken = true
-			var paid := note_value()
+			var paid := note_value(int(b.get("tier", 0)))
 			cash += paid
-			cash_taken.emit(float(b.x), float(b.z), paid)
+			cash_taken.emit(float(b.x), float(b.z), paid, int(b.get("tier", 0)))
 
 
 ## Entities behind the batch are dropped. Without this the arrays grow for the

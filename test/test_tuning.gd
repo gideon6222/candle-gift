@@ -119,3 +119,105 @@ func test_the_star_bands_are_a_real_ladder(t: TestHarness) -> void:
 			"the star thresholds must ascend")
 	t.eq(Tuning.stars_for(0.0, 100.0), 0, "nothing earns nothing")
 	t.eq(Tuning.stars_for(1000.0, 100.0), 3, "a great run earns all three")
+
+
+func test_the_denominations_are_the_reference_s_own_tags(t: TestHarness) -> void:
+	## `REFERENCE.md` records three values read off price tags lying on the
+	## track: `5 $`, `154 $`, `610 $`. The tiers exist to reproduce those, so
+	## the assertion is against the observed numbers rather than against the
+	## multipliers - a multiplier is an implementation of this, not the point.
+	##
+	## EACH AGAINST THE LEVEL IT WAS ACTUALLY OBSERVED AT. The three tags come
+	## off different frames of a walkthrough covering several levels, so they are
+	## not one level's price list: `5 $` is early footage, the bigger two are
+	## later. The first draft of this asserted all three at level ten and failed
+	## on tier 0 reading 25 - which was the test being right and the comment in
+	## `Tuning` being wrong.
+	t.gt(Tuning.scale_for(10), 1.0, "level 10 has no scaling, so this proves nothing")
+	for row in [[1, 0, 5.0], [10, 1, 154.0], [10, 2, 610.0]]:
+		var sim := Sim.new(int(row[0]))
+		var tier := int(row[1])
+		var want := float(row[2])
+		var got := sim.note_value(tier)
+		## Within 5%, because the multipliers are round numbers and the observed
+		## values were read off a video frame.
+		t.lt(absf(got - want) / want, 0.05,
+			"tier %d at level %d reads %d, but the reference's tag says %d"
+				% [tier, int(row[0]), int(got), int(want)])
+
+
+func test_a_bigger_tag_is_always_worth_more(t: TestHarness) -> void:
+	## A ladder, not a set. If two tiers ever paid the same the player would be
+	## choosing between a hazard and no hazard for no reason.
+	var sim := Sim.new(1)
+	for i in Tuning.CASH_TIERS.size() - 1:
+		t.gt(sim.note_value(i + 1), sim.note_value(i) * 1.5,
+			"tier %d pays %d and tier %d pays %d - not enough between them"
+				% [i, int(sim.note_value(i)), i + 1, int(sim.note_value(i + 1))])
+
+
+func test_every_big_tag_is_behind_a_hazard(t: TestHarness) -> void:
+	## THE MECHANIC. Money is meant to be a decision rather than something driven
+	## over, and the whole of that rests on the big tags never lying in the open.
+	##
+	## Played rather than reasoned about: the tier is decided at spawn from the
+	## same hash that decides the guard, and a test that re-derived it here would
+	## agree with a broken spawner. So play levels and look at what is on the
+	## ground - if a tier ever appears without an obstacle near it, the rule has
+	## been lost.
+	var seen := {0: 0, 1: 0, 2: 0}
+	var unguarded_big := 0
+	for level in [1, 3, 6, 10]:
+		var sim := Sim.new(level)
+		while not sim.over:
+			sim.advance(1.0 / 30.0)
+			for b in sim.notes:
+				## ONLY TAGS THE PLAYER CAN STILL GO FOR. A tag behind the batch
+				## is not a decision any more, and the first draft failed on
+				## exactly that: the barrier sits a metre nearer than its tag, so
+				## it is retired one frame earlier, and for that frame a note
+				## fourteen metres behind the batch has no obstacle beside it.
+				## That is a real transient and it is not the rule being broken.
+				if float(b.z) < sim.distance:
+					continue
+				var tier := int(b.get("tier", 0))
+				seen[tier] = int(seen[tier]) + 1
+				if tier == 0:
+					continue
+				var near := false
+				for o in sim.obstacles:
+					if absf(float(o.z) - float(b.z)) < 14.0:
+						near = true
+						break
+				if not near:
+					unguarded_big += 1
+	## The fixture has to contain the thing it is about, or it passes by absence.
+	t.gt(float(seen[1]), 0.0, "no middle tag appeared at all across four levels")
+	t.gt(float(seen[2]), 0.0, "no big tag appeared at all across four levels")
+	t.eq(unguarded_big, 0, "a tag above the small one was lying in open road")
+
+
+func test_the_small_tag_is_still_most_of_the_money_on_the_ground(t: TestHarness) -> void:
+	## The denominations must not turn every note into an event. The big tag is
+	## worth having because it is rare; if a third of the tags were big, money
+	## would swamp the batch again - which is exactly what the first attempt did,
+	## taking idling from 0 stars to 2.
+	var small := 0
+	var big := 0
+	for level in [1, 3, 6, 10]:
+		var sim := Sim.new(level)
+		var counted := {}
+		while not sim.over:
+			sim.advance(1.0 / 30.0)
+			for b in sim.notes:
+				var key := "%.1f" % float(b.z)
+				if counted.has(key):
+					continue
+				counted[key] = true
+				if int(b.get("tier", 0)) == 0:
+					small += 1
+				else:
+					big += 1
+	t.gt(float(small + big), 20.0, "too few notes spawned to say anything")
+	t.lt(float(big) / float(small + big), 0.25,
+		"%d of %d tags are above the small one" % [big, small + big])

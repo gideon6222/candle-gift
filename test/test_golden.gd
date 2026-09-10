@@ -26,10 +26,10 @@ extends RefCounted
 ## does, something has leaked out of `src/game/` into `src/sim/`.
 
 const GOLDEN := {
-"idle": {"level": 1, "distance": 408.058, "x": 0.0, "count": 11, "standing": true, "colours": 2.545, "glitter": 1.0, "pressed": 8, "wrapped": 11, "worth": 1684.275, "cash": 70.0, "lost": 3, "gained": 13, "dips": 52, "stations": 1, "obstacles": 3, "loose": 2, "notes": 0, "over": true, "seconds": 35.483, "value": 120.528, "norm": 120.528, "stars": 0},
-"dodge": {"level": 1, "distance": 408.058, "x": -2.894, "count": 9, "standing": true, "colours": 2.889, "glitter": 0.889, "pressed": 9, "wrapped": 9, "worth": 2686.001, "cash": 65.0, "lost": 3, "gained": 11, "dips": 55, "stations": 1, "obstacles": 3, "loose": 2, "notes": 0, "over": true, "seconds": 35.483, "value": 145.58, "norm": 145.58, "stars": 1},
-"gather": {"level": 1, "distance": 408.058, "x": -1.137, "count": 6, "standing": true, "colours": 3.333, "glitter": 1.667, "pressed": 4, "wrapped": 6, "worth": 2720.82, "cash": 95.0, "lost": 12, "gained": 17, "dips": 67, "stations": 1, "obstacles": 3, "loose": 2, "notes": 0, "over": true, "seconds": 35.483, "value": 176.625, "norm": 176.625, "stars": 1},
-"weave": {"level": 1, "distance": 408.058, "x": -2.894, "count": 12, "standing": true, "colours": 2.917, "glitter": 3.0, "pressed": 12, "wrapped": 12, "worth": 13088.494, "cash": 80.0, "lost": 3, "gained": 14, "dips": 132, "stations": 1, "obstacles": 3, "loose": 2, "notes": 0, "over": true, "seconds": 35.483, "value": 472.655, "norm": 472.655, "stars": 2},
+"idle": {"level": 1, "distance": 408.058, "x": 0.0, "count": 11, "standing": true, "colours": 2.545, "glitter": 1.0, "pressed": 8, "wrapped": 11, "worth": 1684.275, "cash": 30.0, "lost": 3, "gained": 13, "dips": 52, "stations": 1, "obstacles": 3, "loose": 2, "notes": 0, "over": true, "seconds": 35.483, "value": 80.528, "norm": 80.528, "stars": 0},
+"dodge": {"level": 1, "distance": 408.058, "x": -2.894, "count": 9, "standing": true, "colours": 2.889, "glitter": 0.889, "pressed": 9, "wrapped": 9, "worth": 2686.001, "cash": 35.0, "lost": 3, "gained": 11, "dips": 55, "stations": 1, "obstacles": 3, "loose": 2, "notes": 0, "over": true, "seconds": 35.483, "value": 115.58, "norm": 115.58, "stars": 0},
+"gather": {"level": 1, "distance": 408.058, "x": -1.137, "count": 5, "standing": true, "colours": 3.2, "glitter": 1.6, "pressed": 3, "wrapped": 5, "worth": 2134.53, "cash": 160.0, "lost": 13, "gained": 17, "dips": 60, "stations": 1, "obstacles": 3, "loose": 2, "notes": 0, "over": true, "seconds": 35.483, "value": 224.036, "norm": 224.036, "stars": 1},
+"weave": {"level": 1, "distance": 408.058, "x": -2.894, "count": 12, "standing": true, "colours": 2.917, "glitter": 3.0, "pressed": 12, "wrapped": 12, "worth": 12911.879, "cash": 35.0, "lost": 3, "gained": 14, "dips": 132, "stations": 1, "obstacles": 3, "loose": 2, "notes": 0, "over": true, "seconds": 35.483, "value": 422.356, "norm": 422.356, "stars": 2},
 }
 
 

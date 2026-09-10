@@ -65,20 +65,55 @@ func test_hash_covers_the_whole_unit_interval_evenly(t: TestHarness) -> void:
 ## Every threshold the game actually compares a hash against, checked against
 ## the source rather than against the spawn it produces.
 func test_the_thresholds_the_game_uses_can_all_fire(t: TestHarness) -> void:
+	## TWO THOUSAND SAMPLES, not two hundred.
+	##
+	## The count has to be large enough that the SMALLEST threshold in the list
+	## says something. At 200 samples the big price tag's 0.035 expects seven
+	## hits and drew two, which is ordinary variance rather than a broken hash -
+	## and loosening the bound to accept it would have made the test vacuous for
+	## every other constant. Sample more instead of asserting less.
+	const SAMPLES := 2000
 	var fires := func(threshold: float) -> int:
 		var hit := 0
-		for c in 200:
+		for c in SAMPLES:
 			if SimUtil.hash2(c, 91) < threshold:
 				hit += 1
 		return hit
-	t.gt(fires.call(Tuning.BARRIER_CHANCE), 30, "barriers can never spawn")
-	t.gt(fires.call(Tuning.ROLLER_CHANCE), 20, "rollers can never spawn")
-	t.gt(fires.call(Tuning.SWEEPER_CHANCE), 18, "sweepers can never spawn")
-	t.gt(fires.call(Tuning.CASH_CHANCE), 70, "money can never spawn")
-	t.gt(fires.call(Tuning.loose_chance_for(1)), 60, "loose candles can never spawn at level 1")
-	# and the inverse: a threshold must not fire every single time either
-	t.lt(fires.call(Tuning.CASH_CHANCE), 200, "money spawns in literally every chunk")
-	t.lt(fires.call(Tuning.loose_chance_for(9)), 200, "loose candles saturate the runway")
+	## AGAINST THE THRESHOLD, NOT AGAINST A LITERAL.
+	##
+	## These bounds were four hand-derived counts, each one right for the value
+	## the constant had on the day it was written. Halving `CASH_CHANCE` for the
+	## denominations failed this with "money can never spawn" - which is not what
+	## had happened at all, and is the failure message actively misleading the
+	## reader about a correct change.
+	##
+	## What the test is really about is that the hash covers the threshold: a
+	## constant the generator can never reach disables a whole mechanic silently.
+	## So expect roughly `threshold * 200` and allow a wide band around it.
+	for row in [
+		[Tuning.BARRIER_CHANCE, "barriers"], [Tuning.ROLLER_CHANCE, "rollers"],
+		[Tuning.SWEEPER_CHANCE, "sweepers"], [Tuning.CASH_CHANCE, "money"],
+		[Tuning.TIER1_CHANCE, "middle price tags"], [Tuning.TIER2_CHANCE, "big price tags"],
+	]:
+		var threshold := float(row[0])
+		var name := String(row[1])
+		var hit: int = fires.call(threshold)
+		t.gt(float(hit), threshold * float(SAMPLES) * 0.5,
+			"%s fire %d times in %d against a threshold of %.3f, which is far "
+				% [name, hit, SAMPLES, threshold] + "below the %d expected - the hash does "
+				% int(threshold * float(SAMPLES)) + "not cover this constant")
+		t.gt(float(hit), 2.0, "%s can never spawn at all" % name)
+	## The same treatment for the derived one, and for the inverse. These were
+	## three more hand-derived literals against a 200-sample run; stated against
+	## the threshold they survive a rebalance, which is the whole point.
+	var loose1 := Tuning.loose_chance_for(1)
+	t.gt(float(fires.call(loose1)), loose1 * float(SAMPLES) * 0.5,
+		"loose candles can never spawn at level 1")
+	## And the inverse: a threshold must not fire EVERY time either, or the
+	## thing it gates is not a chance, it is a rule.
+	for row in [[Tuning.CASH_CHANCE, "money spawns in literally every chunk"],
+			[Tuning.loose_chance_for(9), "loose candles saturate the runway"]]:
+		t.lt(float(fires.call(float(row[0]))), float(SAMPLES) * 0.95, String(row[1]))
 
 
 func test_a_seeded_stream_replays_and_two_seeds_differ(t: TestHarness) -> void:

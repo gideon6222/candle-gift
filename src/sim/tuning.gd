@@ -84,6 +84,52 @@ const POOL_INSET := 0.15
 ## A banknote is worth 5, because the reference's price tags say `5 $`. Money
 ## in this game is in the reference's units - see VALUE_SCALE.
 const CASH_VALUE := 5
+
+## THE DENOMINATIONS, taken from the reference's own tags.
+##
+## `REFERENCE.md` records three values read off price tags lying on the track:
+## `5 $`, `154 $`, `610 $`. Those are not three different levels of the same
+## tag - a tag is a tag, and the reference shows them as distinct things - so
+## money in this game comes in three denominations rather than one.
+##
+## The multipliers are `1 / 6 / 24` because that is what the observed values
+## divide back to - but NOT all at the same level, and saying so was wrong the
+## first time this comment was written. The three tags were read off different
+## frames of a walkthrough that covers several levels:
+##
+## | tag | tier | level it reads at |
+## |---|---|---|
+## | `5 $` | 0 | 1 (`scale_for(1)` = 1.0, so 5 x 1 x 1) |
+## | `154 $` | 1 | 10 (`scale_for(10)` = 5.16, so 5 x 6 x 5.16 = 155) |
+## | `610 $` | 2 | 10 (5 x 24 x 5.16 = 619) |
+##
+## That is the honest reading: a `5 $` tag in early footage and bigger tags
+## later. `test_the_denominations_are_the_reference_s_own_tags` asserts each
+## against the level it was actually observed at, so the claim in this table is
+## the thing being checked rather than a tidier one that happens to pass.
+const CASH_TIERS := [1.0, 6.0, 24.0]
+
+## WHICH TIER LIES WHERE, and this is the mechanic rather than the decoration.
+##
+## A loose tag on open road is always the small one. **Every large tag is behind
+## a hazard**, which turns money from something you drive over into something you
+## decide about - and it is the reference's own arrangement, which puts its
+## banknote lines behind obstacles.
+##
+## So: this many of all cash chunks carry the middle tag and this many the big
+## one, and a chunk that draws either PLANTS ITS OWN BARRIER on the cash line
+## whatever the ordinary barrier roll says. The guard is part of the tag rather
+## than a coincidence it depends on - see the comment in `Sim._spawn_chunk` for
+## the two ways the coincidence version failed.
+##
+## MEASURED, not chosen. The first attempt made every guarded note tier 1 and a
+## fifth of those tier 2, which put the mean multiplier at 5.9 and money at five
+## times its old share: idling went from 0 stars to 2 (a policy that does nothing
+## but drive forward was collecting a fortune), and weaving fell from 6.0x idling
+## to 2.5x. `weaving the pools beats only collecting` caught it, which is what
+## that guard is for. See NOTES.md for the table.
+const TIER1_CHANCE := 0.14
+const TIER2_CHANCE := 0.035
 const MAGNET_RADIUS := 2.0
 
 ## How plentiful loose candles are, and it RISES WITH THE LEVEL. Thirty candles
@@ -114,7 +160,11 @@ const BARRIER_CHANCE := 0.24
 const ROLLER_CHANCE := 0.18
 const SWEEPER_CHANCE := 0.16
 const HAZARD_PER_LEVEL := 0.16
-const CASH_CHANCE := 0.50
+## FEWER NOTES, WORTH MORE EACH. Halved when the denominations arrived: the
+## reference's tags are occasional things carrying a real number, not a stream
+## of identical fives, and the total money a run is worth has to stay where it
+## was or the batch stops being the point of the game.
+const CASH_CHANCE := 0.26
 const GUARDED_CASH := 0.55
 
 const COLLIDE_TOLERANCE := 0.34

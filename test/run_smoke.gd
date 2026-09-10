@@ -479,7 +479,7 @@ func _check_value_appears_where_it_is_earned(main) -> void:
 	_t.gt(main.FLOAT_SCREEN_FRAC, 0.02, "floaters are too small to read while steering")
 	_t.lt(main.FLOAT_SCREEN_FRAC, 0.09, "floaters are big enough to cover the runway")
 
-	main._on_cash_taken(1.5, 40.0, main.sim.note_value())
+	main._on_cash_taken(1.5, 40.0, main.sim.note_value(), 0)
 	main._on_picked_up(-1.0, 42.0)
 	main._on_hit("barrier", 0.5, 44.0, 3)
 
