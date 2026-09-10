@@ -133,6 +133,16 @@ var _shake := 0.0
 ## rather than five stacked into a lurch.
 var _shake_lock := 0.0
 
+## BURST POOLS. Eight of each, cycled - a slab crossing a pool dips one candle
+## per frame for most of a second, so bursts have to overlap.
+const BURSTS := 8
+var _dip_burst: Array[GPUParticles3D] = []
+var _hit_burst: Array[GPUParticles3D] = []
+var _spark_burst: Array[GPUParticles3D] = []
+var _dip_cursor := 0
+var _hit_cursor := 0
+var _spark_cursor := 0
+
 ## The last step handed to `_tick`, so the camera's easing is in game time like
 ## everything else. Read only by `_draw_camera`.
 var _last_dt := 1.0 / 60.0
@@ -429,6 +439,13 @@ func _build_world() -> void:
 
 	_build_floaters()
 
+	for _i in BURSTS:
+		## Wax throws heavy drops that fall back. Glitter is light and hangs.
+		## A knock throws chips hard and fast, and reads as debris.
+		_dip_burst.append(_make_burst("res://assets/particles/droplet.png", 2.4, -7.0, 0.22))
+		_spark_burst.append(_make_burst("res://assets/particles/glitter.png", 1.4, -1.6, 0.17))
+		_hit_burst.append(_make_burst("res://assets/particles/glow.png", 3.4, -9.0, 0.30))
+
 	for i in STATION_SLOTS:
 		_rigs.append(_make_rig())
 
@@ -567,6 +584,81 @@ func _make_splash() -> GPUParticles3D:
 	quad.material = mat
 	g.draw_pass_1 = quad
 	return g
+
+
+## A ONE-SHOT BURST, pooled, for the moments that had no picture at all.
+##
+## The ladle's pour was the only thing in the game emitting a particle, so a
+## candle taking a coat of wax, glitter landing on it and an obstacle knocking
+## three off the back all happened with nothing on screen but a number changing.
+##
+## One emitter per burst, cycled, rather than one per event: `GPUParticles3D`
+## restarts on `emitting = true`, so a pool of eight lets several bursts overlap
+## - which they must, because a slab crossing a pool dips one candle per frame
+## for most of a second.
+func _make_burst(tex_path: String, up: float, grav: float, size: float) -> GPUParticles3D:
+	var g := GPUParticles3D.new()
+	g.amount = 12
+	g.lifetime = 0.6
+	## ALL AT ONCE. A burst is an impact, not a jet: at 0.0 the twelve particles
+	## are spread evenly over the lifetime and it reads as a small fountain that
+	## happens to stop.
+	g.explosiveness = 1.0
+	g.randomness = 0.8
+	g.one_shot = true
+	g.emitting = false
+	g.local_coords = false
+
+	var m := ParticleProcessMaterial.new()
+	m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	m.emission_sphere_radius = 0.3
+	m.direction = Vector3(0, 1, 0)
+	m.spread = 60.0
+	m.initial_velocity_min = up * 0.6
+	m.initial_velocity_max = up
+	m.gravity = Vector3(0, grav, 0)
+	m.scale_min = 0.6
+	m.scale_max = 1.2
+	var curve := Curve.new()
+	curve.add_point(Vector2(0.0, 1.0))
+	curve.add_point(Vector2(1.0, 0.0))
+	var ct := CurveTexture.new()
+	ct.curve = curve
+	m.scale_curve = ct
+	g.process_material = m
+
+	var quad := QuadMesh.new()
+	quad.size = Vector2(size, size)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = load(tex_path)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	## Same rule as the pour's spatter: billboarded quads must not write depth,
+	## or each punches a hole in the ones behind it and the burst flickers as
+	## they sort.
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat.vertex_color_use_as_albedo = true
+	quad.material = mat
+	g.draw_pass_1 = quad
+	add_child(g)
+	return g
+
+
+## Fire one, at a place, in a colour. `modulate` does not exist on
+## `GPUParticles3D` - the tint belongs to the draw pass's material, which is the
+## same trap the ladle's splash already records.
+func _burst(pool: Array[GPUParticles3D], cursor: int, at: Vector3, tint: Color) -> int:
+	var g := pool[cursor]
+	g.position = at
+	var mat: StandardMaterial3D = g.draw_pass_1.material
+	mat.albedo_color = tint
+	## `restart()` rather than `emitting = true`: an emitter that is already
+	## running ignores the assignment, so the fastest bursts - which are exactly
+	## the ones worth seeing - would be the ones that never appeared.
+	g.restart()
+	g.emitting = true
+	return (cursor + 1) % pool.size()
 
 
 ## THE POUR: a tapering, slightly kinked column.
@@ -1942,7 +2034,7 @@ func _start_run() -> void:
 	_set_phase(Phase.RUN)
 
 
-func _on_dipped(_kind: int, _x: float, _z: float, _colour: Color) -> void:
+func _on_dipped(kind: int, x: float, z: float, colour: Color) -> void:
 	## Pitched by how many colours are already on the leading candle, so weaving
 	## through four pools plays a rising figure rather than four identical
 	## clicks. The batch dips one candle at a time, and the round-robin voices
@@ -1951,6 +2043,21 @@ func _on_dipped(_kind: int, _x: float, _z: float, _colour: Color) -> void:
 	if sim.count() > 0:
 		layer = sim.batch[0].layers.size()
 	_sfx.play_dip(layer)
+
+	## A DIP THROWS WAX, and glitter sparkles instead of splashing.
+	##
+	## This is the moment the player's whole line was aimed at and it had no
+	## picture at all - a candle changed colour and a note played. The burst is
+	## in the wax's OWN colour, so weaving through two pools throws two colours
+	## and the decision the player just made is visible in the spray.
+	##
+	## No text here, deliberately, unlike the pickups: thirty candles crossing a
+	## pool would put thirty numbers on the screen at once, and the one thing
+	## worth reading in that second is which colours went on.
+	if kind == Stations.GLITTER:
+		_spark_cursor = _burst(_spark_burst, _spark_cursor, Vector3(x, 0.35, z), colour)
+	else:
+		_dip_cursor = _burst(_dip_burst, _dip_cursor, Vector3(x, 0.2, z), colour)
 
 
 func _on_picked_up(x: float, z: float) -> void:
@@ -1995,6 +2102,8 @@ func _on_hit(_kind: String, x: float, z: float, n: int) -> void:
 	if _shake_lock <= 0.0:
 		_shake = minf(0.16 + float(n) * 0.05, 0.34)
 		_shake_lock = 0.12
+	## Debris off the obstacle, in the hazard colour, thrown hard.
+	_hit_cursor = _burst(_hit_burst, _hit_cursor, Vector3(x, 0.6, z), CORAL_LIGHT)
 
 
 func _say(msg: String) -> void:

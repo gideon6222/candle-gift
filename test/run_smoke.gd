@@ -490,7 +490,56 @@ func _check_value_appears_where_it_is_earned(main) -> void:
 		main._on_picked_up(0.0, 50.0 + float(i))
 	_t.eq(main._floaters.size(), main.FLOATERS,
 		"the floater pool grew to %d under a burst" % main._floaters.size())
+
+	## AND THE MOMENTS THAT HAD NO PICTURE NOW HAVE ONE.
+	##
+	## A dip is what the player's whole line was aimed at and it happened with
+	## nothing on screen but a colour change and a note. The ladle's pour was
+	## the only emitter in the game.
+	##
+	## Asserted through the handlers, and on POSITION as well as emission - an
+	## emitter that fires at the origin every time is firing, and is also
+	## invisible, which is the failure that would otherwise pass here.
+	for g in main._dip_burst + main._spark_burst + main._hit_burst:
+		g.emitting = false
+		g.position = Vector3.ZERO
+	## WHICH emitter fires is the cursor's business, and the cursor has already
+	## moved - twelve seconds of play happened above. Read it before the call
+	## rather than assuming index zero, which is what the first draft did and is
+	## how this check failed on entirely correct code.
+	var dip_i: int = main._dip_cursor
+	main._on_dipped(Stations.WAX, 1.25, 61.0, Color.HOT_PINK)
+	main._on_dipped(Stations.GLITTER, -1.25, 62.0, Color.WHITE)
+	main._on_hit("roller", 0.75, 63.0, 2)
+
+	_t.eq(_emitting(main._dip_burst), 1, "a wax dip threw no wax")
+	_t.eq(_emitting(main._spark_burst), 1, "glitter landing produced no sparkle")
+	_t.eq(_emitting(main._hit_burst), 1, "an obstacle knocked candles off with no debris")
+	_t.lt(absf(main._dip_burst[dip_i].position.x - 1.25), 0.01,
+		"the wax burst fired at x=%.2f, not where the candle was dipped"
+			% main._dip_burst[dip_i].position.x)
+	## The tint is the WAX's colour, so weaving two pools throws two colours and
+	## the decision the player just made is visible in the spray. `modulate` does
+	## not exist on GPUParticles3D; the tint lives on the draw pass's material,
+	## which is the trap the ladle's splash already records.
+	var dip_mat: StandardMaterial3D = main._dip_burst[dip_i].draw_pass_1.material
+	_t.ok(dip_mat.albedo_color.is_equal_approx(Color.HOT_PINK),
+		"the wax burst is %s, not the colour of the pool it came from" % dip_mat.albedo_color)
+
+	## Bounded like the floaters, and for the same reason.
+	for i in main.BURSTS * 3:
+		main._on_dipped(Stations.WAX, 0.0, 70.0 + float(i), Color.RED)
+	_t.eq(main._dip_burst.size(), main.BURSTS,
+		"the wax burst pool grew to %d" % main._dip_burst.size())
 	main.freeze(1)
+
+
+func _emitting(pool: Array) -> int:
+	var n := 0
+	for g in pool:
+		if g.emitting:
+			n += 1
+	return n
 
 
 ## No station gantry may be drawn CLOSE TO THE LENS.
