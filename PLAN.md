@@ -8,7 +8,7 @@ for.
 
 ---
 
-## Round five is on its ninth of eleven boxes
+## Round five is on its ninth of eleven boxes, plus the denominations
 
 Shipped 2026-09-10: shadows and fog, the camera framing the whole batch, floating value text,
 particle bursts, the camera kick, the numbered price tags, the podium, the Android back
@@ -83,7 +83,9 @@ Straight off `REFERENCE.md`'s own "Still open" list, which has sat unworked for 
 
 - [x] **3.1 The finished batch stands on a dark navy podium** at the ruler, instead of being
       lit in place on the runway. Screenshot 5 shows it clearly.
-- [x] **3.2 Price tags carry their number.** Theirs read `5 $`, `154 $`; ours are blank.
+- [x] **3.2 Price tags carry their number** — and their number is one of the reference's three
+      denominations, with every tag above the smallest planted behind a barrier of its own.
+      Asked for on 2026-09-10 and measured back to the old six-level mean. **3.2 Theirs read `5 $`, `154 $`; ours are blank.
 - [ ] **3.3 Shop fronts are bought in the track**, with a green `+` per panel, rather than
       being scenery that opens a sheet. NOT DONE, and the largest remaining reference gap.
       The shop model is right (`shops.gd`, a seven-rung ladder, next-rung-only); what is

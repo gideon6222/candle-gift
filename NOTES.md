@@ -1,5 +1,119 @@
 # Notes — Candle Gift
 
+## Money in three denominations, 2026-09-10
+
+Gideon: *"I would go with the reference process tags and build the prices around those."*
+The tag values come first and everything downstream moves to match.
+
+### The denominations are the reference's own tags, at the levels they were read at
+
+`REFERENCE.md` records `5 $`, `154 $`, `610 $` off price tags on the track. Those are three
+DENOMINATIONS, not one tag seen at three levels — but they are also not one level's price
+list, and getting that wrong was the first mistake here. The multipliers are `1 / 6 / 24`
+against `CASH_VALUE`, and each observed value lands at the level it was actually filmed at:
+
+| tag | tier | level | arithmetic |
+|---|---|---|---|
+| `5 $` | 0 | 1 | 5 × 1 × 1.00 |
+| `154 $` | 1 | 10 | 5 × 6 × 5.16 = 155 |
+| `610 $` | 2 | 10 | 5 × 24 × 5.16 = 619 |
+
+The first version of the comment in `Tuning` claimed all three read at level ten, and
+`test_the_denominations_are_the_reference_s_own_tags` failed on tier 0 reading 25. **The test
+was right and the comment was wrong** — worth recording because the temptation was to move the
+test.
+
+### A big tag brings its own guard, and it took two wrong shapes to get there
+
+The rule is that a tag above the smallest is never lying in open road: money is a decision,
+not something driven over.
+
+1. **The tier read a `guarded` flag rolled before the obstacles.** But the barrier has its own
+   independent chance and does not spawn at all before chunk five, so a note could be marked
+   guarded and lie on empty track. `test_every_big_tag_is_behind_a_hazard` caught it.
+2. **The tier then read whether a barrier had actually spawned.** That needed three rolls to
+   agree, and big tags stopped appearing at all — the test's own fixture assertion ("no big tag
+   appeared across four levels") caught that.
+
+Both are the same mistake: **letting the rule be an accident of two independent decisions.**
+The tier is now rolled first and anything above the smallest plants its own barrier on the
+cash line whatever the ordinary barrier roll says, so the rule is true by construction.
+
+### The first rarity numbers were badly wrong, and the standing guard caught it
+
+Making every guarded note tier 1 and a fifth of those tier 2 put the mean multiplier at 5.9:
+
+| policy | before | first attempt | shipped |
+|---|---|---|---|
+| idle | 100 (0 stars) | **335 (2 stars)** | 107 (0 stars) |
+| dodge | 194 | 361 | 186 |
+| gather | 172 | 487 | 193 |
+| weave | 600 (3 stars) | 826 | 608 (3 stars) |
+| weave / idle | **6.0x** | **2.5x** | **5.7x** |
+
+A policy that does nothing but drive forward was collecting a fortune. `weaving the pools
+beats only collecting` is the guard that fired, and it is exactly what that guard is for.
+
+At `TIER1_CHANCE` 0.14 / `TIER2_CHANCE` 0.035 with `CASH_CHANCE` halved to 0.26, the six-level
+mean is **608 against the old 600** — so `PAR = 450` still holds untouched, and the shop ladder
+still reaches every rung at the same level it did (3, 5, 6, 9, 12, 15, 20), with both prices
+the reference actually shows intact.
+
+**The top rung's overshoot is structural, not a pricing error.** Raising `FLAGSHIP` from
+420,000 to 560,000 pushed it from level 20 to 21 and made the leftover bank *worse* (188k, was
+125k). At 1.2x income per level, whatever the price, the run that finally affords it earns
+roughly a level's income more than it needs. Reverted.
+
+### The golden diff, read rather than re-recorded blind
+
+`idle` and `dodge` changed in `cash` alone, every other field identical. `weave` likewise apart
+from `worth` moving 1.4% on the same counts — `Candle.value()` scores adjacent contrasting
+pairs, so the same colours in a different ORDER are worth a different amount, and the extra
+planted barriers nudge the path.
+
+`gather` is the interesting one and it is the mechanic working:
+
+| | before | after |
+|---|---|---|
+| candles | 6 | **5** |
+| lost | 12 | **13** |
+| cash | 95 | **160** |
+
+A bot that chases money now runs into the barriers guarding it, and pays in candles.
+
+### The number has to be readable, because it IS the decision
+
+Three faults, all found by printing the label's text and screen position rather than by looking
+harder at the picture.
+
+- **Floaters piled up.** Three events in the same moment at almost the same place drew as one
+  clump reading `-3+1+1`. Staggered off the pool cursor, not off the position — two events at
+  the SAME spot is the case that fails.
+- **The tag number was invisible.** It was drawn, correct, reading `298 $` at 0.54 down the
+  frame. Sized in world units it was 0.365 units, which at the ~24 m a tag is decided at is
+  1.4% of frame height and under ten pixels once the lean foreshortened it. **The first guess —
+  that its own barrier occluded it — was plausible and wrong.** Fixed size, like the floaters
+  and for the same reason, and this one needs it more because a tag is read further away than a
+  floater ever is.
+- **Then it rendered mirrored.** A `Label3D` lying on the road faces away from a camera behind
+  it. The station signs already carry the Y flip; the tags did not. Mirrored text is the worst
+  of the three — legible enough to read as a rendering bug.
+
+The guard for the facing is tied to the STATION SIGNS' rotation rather than to 3.14, so the
+convention cannot change for one and not the other.
+
+### And a test whose failure message was actively misleading
+
+`test_util`'s threshold checks were four hand-derived counts, each right for the constant it was
+written against. Halving `CASH_CHANCE` failed one with **"money can never spawn"** — which is
+not what had happened, and is a failure message telling the reader the opposite of the truth
+about a correct change. They are stated against the threshold now.
+
+The sample count went 200 → 2000 at the same time, because at 200 the big tag's 0.035 expects
+seven hits and drew two. **Loosening the bound to accept that would have made the check vacuous
+for every other constant; sampling more asserts the same property honestly.**
+
+
 ## Round five, 2026-09-10 — upgrading against the intent rather than the defect list
 
 Gideon asked for the game to be brought up to the framework and for every aspect to be
