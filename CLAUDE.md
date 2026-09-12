@@ -131,7 +131,8 @@ appears to do nothing.
 ## Four checks, and each answers a different kind of question
 
 ```bash
-scripts/check.sh          # all of it, in the order that fails fastest
+scripts\check.ps1        # all of it, in the order that fails fastest - the gate
+scripts/check.sh          # the same steps under bash, for a Git Bash shell
 ```
 
 | | Runs | Answers |
@@ -161,7 +162,8 @@ to doubt.
 **`run_visual.gd` is a LOCAL gate and is deliberately not in CI.** CI has no GPU, and the
 software renderer available there is a different one - thresholds derived on Vulkan would have
 to be re-derived on llvmpipe, and two sets of numbers for one check is how a check stops
-meaning anything. Run `scripts/check.sh` before committing.
+meaning anything. Run `scripts\check.ps1` before committing (or `scripts/check.sh`
+from Git Bash - the same steps).
 
 **`scripts/sheet.gd` is for looking, not for passing.** It renders twelve frames across a
 level into a grid, which is how the wrong things get NOTICED; the checks above are how they
